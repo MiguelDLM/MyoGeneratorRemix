@@ -12,9 +12,9 @@ curveToMesh = False
 
 class myoGenerator_panel_PT_(bpy.types.Panel):
 
-    bl_idname = "MyoGenerator"
+    bl_idname = "MyoGeneratorRemix"
     bl_label = "MyoGenerator: create muscle"
-    bl_category = "MyoGenerator"
+    bl_category = "MyoGeneratorRemix"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 
@@ -23,18 +23,19 @@ class myoGenerator_panel_PT_(bpy.types.Panel):
 
         box = layout.box()
         box.label(text="Data Storage Location")
-        row = box.row()
-        row.prop(context.scene, "conf_path", text="")
 
         row = box.row()
-        row.prop(context.scene, "file_name", text="")
+        row.prop(context.scene, "conf_path", text="Folder path")	
+
+        row = box.row()
+        row.prop(context.scene, "file_name", text="File name", icon='GREASEPENCIL')
 
         layout.separator()
 
         box = layout.box()
         box.label(text="Muscle ID")
         row = box.row()
-        row.prop(context.scene, "muscle_Name", text="Muscle Name")
+        row.prop(context.scene, "muscle_Name", text="Muscle Name", icon='GREASEPENCIL')
         row.enabled = (context.scene.file_name != "")
 
         row = box.row()
@@ -50,11 +51,11 @@ class myoGenerator_panel_PT_(bpy.types.Panel):
 
         row = box.row()
         col1 = row.column()
-        col1.operator("view3d.attch", text="Start Origin Selection")
+        col1.operator("view3d.select_origin", text="Start Origin Selection")
         col1.enabled = context.scene.origin_object is not None
 
         col2 = row.column()
-        col2.operator('view3d.select_origin', text="Submit Origin")
+        col2.operator('view3d.submit_origin', text="Submit Origin")
         col2.enabled = context.scene.origin_object is not None
 
         layout.separator()
@@ -66,11 +67,11 @@ class myoGenerator_panel_PT_(bpy.types.Panel):
 
         row2 = box.row()
         col1 = row2.column()
-        col1.operator("view3d.attch", text="Start Insertion Selection")
+        col1.operator("view3d.select_insertion", text="Start Insertion Selection")
         col1.enabled = context.scene.insertion_object is not None
 
         col2 = row2.column()
-        col2.operator('view3d.select_insertion', text="Submit Insertion")
+        col2.operator('view3d.submit_insertion', text="Submit Insertion")
         col2.enabled = context.scene.insertion_object is not None
 
         layout.separator()
@@ -85,7 +86,6 @@ class myoGenerator_panel_PT_(bpy.types.Panel):
 
         row = box.row()
         row.operator("view3d.curve_creator", text="Create Muscle Curve")
-        row.enabled = vertexCountMatched
 
         layout.separator()
 

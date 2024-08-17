@@ -1,0 +1,26 @@
+schema_version = "1.0.0"
+id = "MyoGeneratorRemix"
+version = "0.1.0"
+name = "MyoGeneratorRemix"
+tagline = "Add-on for muscle reconstruction"
+maintainer = "Miguel Díaz de León <migueldlm1307@gmai.com>"
+type = "add-on"
+website = "https://github.com/MiguelDLM/MyoGeneratorRemix/"
+tags = ["Import-Export", "User Interface"]
+blender_version_min = "4.2.0"
+license = [
+  "SPDX:GPL-2.0-or-later",
+]
+copyright = [
+    "Niccolo Fioritti and Eva Herbst 2022",
+    "2024 Miguel Díaz de León" 
+]
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+[permissions]
+files = "Import/export FBX from/to disk"
+[build]
+paths_exclude_pattern = [
+   "__pycache__/",
+   "/.git/",
+   "/*.zip",
+]

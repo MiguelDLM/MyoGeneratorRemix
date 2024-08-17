@@ -25,7 +25,6 @@ insertion_normal = 0
 
 muscleName = ''
 
-
 def make_empty(Muscle):
 
     from AddonFolder import globalVariables
@@ -58,8 +57,6 @@ def make_empty(Muscle):
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     bpy.ops.object.select_all(action='DESELECT')
     
-
-
 # function creates attachment as new object, parents to muscle empty
 def create_attachment(index, Muscle):
     # also contains functions to recenter object, create boundary, and
@@ -130,7 +127,6 @@ def create_attachment(index, Muscle):
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
 
-
 # calculate muscle attachment
 def get_attachment_area(obj):
 
@@ -146,24 +142,12 @@ def get_attachment_area(obj):
     print("area = " + str(area))
     return area
 
-
-# region GENERAL FUNCTIONALITIES:
-def set_edit_mode():  # sets edit mode
-    # go to edit mode and face select mode, clear selection
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.context.tool_settings.mesh_select_mode = (False, False, True)
-    bpy.ops.mesh.select_all(action='DESELECT')
-
-# region SPECIFIC FOR create_attachment
-
-
 def object_Recenter(obj):
     # center origin of object on center of mass
     # make sure nothing else in scene is selected
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)  # select obj only
     bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY')
-
 
 def create_boundary(obj):  # makes boundary, parents to attachment area area
 
@@ -201,7 +185,6 @@ def create_boundary(obj):  # makes boundary, parents to attachment area area
     bpy.ops.object.mode_set(mode='OBJECT')
     return boundary
 
-
 def get_normal(obj):
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.context.tool_settings.mesh_select_mode = (False, False, True)
@@ -219,13 +202,11 @@ def get_normal(obj):
 
     return normal
 
-
 def calculate_centroid(obj):
     centroid = obj.location
     return centroid
 
 # endregion
-
 
 def curve_creator(attachment_centroids, attachment_normals, Muscle):
 
@@ -397,8 +378,6 @@ def mirror_bevel(Muscle):
     bpy.data.objects[Muscle + " cross section template"].select_set(False)
     bpy.ops.object.mode_set(mode='EDIT')
 
-
-
 def Transform_to_Mesh(Muscle):
 
     try:
@@ -410,11 +389,6 @@ def Transform_to_Mesh(Muscle):
     bpy.context.view_layer.objects.active = bpy.data.objects[Muscle + " curve"]
     bpy.data.objects[Muscle + " curve"].select_set(True)
     bpy.ops.object.convert(target="MESH")
-
-
-
-
-
 
 
 def duplicate_boundaries(Muscle):

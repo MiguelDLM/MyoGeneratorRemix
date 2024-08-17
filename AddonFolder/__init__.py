@@ -15,32 +15,22 @@ import bpy
 
 from AddonFolder.muscleCore import curve_creator
 
-from .myoGenerator_op import (AllowAttach_Op, Calculate_Volume_Op,
+from .myoGenerator_op import (Submit_Origin_Op, Submit_Insertion_Op, Calculate_Volume_Op,
                               Curve_Creator_Op, Join_Muscle_Op,
                               Muscle_Creation_Op, Reset_Variables_Op,
-                              Select_Insertion_Op, Select_Muscle_Op,
+                              Select_Insertion_Op, Muscle_Name_Submition,
                               Select_Origin_Op, SetBevel2_Op, SetBevel_Op,
                               SetTilt_Op, Transform_To_Mesh_Op, Mirror_Cross_Section_Op)
 from .myoGenerator_panel import myoGenerator_panel_PT_
 
-bl_info = {
-    "name": "MyoGenerator",
-    "author": "Niccolo Fioritti and Eva Herbst",
-    "description": "This add-on enables generation of 3D muscles based on user selected origin and insertion areas and an adjustable muscle path.",
-    "blender": (2, 80, 0),
-    "version": (0, 0, 1),
-    "location": "View3D",
-    "doc_url": "https://github.com/evaherbst/-Muscle_Volume_Sculptor/blob/main/README.md",
-    "warning": "",
-    "category": "Mesh"
-}
 
 
 def register():
-    bpy.utils.register_class(Select_Muscle_Op)
+    bpy.utils.register_class(Muscle_Name_Submition)
     bpy.utils.register_class(Select_Origin_Op)
     bpy.utils.register_class(Select_Insertion_Op)
-    bpy.utils.register_class(AllowAttach_Op)
+    bpy.utils.register_class(Submit_Origin_Op)
+    bpy.utils.register_class(Submit_Insertion_Op)
     bpy.utils.register_class(myoGenerator_panel_PT_)
     bpy.utils.register_class(Muscle_Creation_Op)
     bpy.utils.register_class(Curve_Creator_Op)
@@ -62,7 +52,6 @@ def register():
     )
     bpy.types.Scene.file_name = bpy.props.StringProperty(
         name="File_Name",
-        default="",
         description="Your file name. It will be exported as .csv",
         subtype="FILE_NAME"
     )
@@ -123,10 +112,11 @@ def register():
 
 
 def unregister():
-    bpy.utils.unregister_class(Select_Muscle_Op)
+    bpy.utils.unregister_class(Muscle_Name_Submition)
     bpy.utils.unregister_class(Select_Origin_Op)
     bpy.utils.unregister_class(Select_Insertion_Op)
-    bpy.utils.unregister_class(AllowAttach_Op)
+    bpy.utils.unregister_class(Submit_Origin_Op)
+    bpy.utils.unregister_class(Submit_Insertion_Op)
     bpy.utils.unregister_class(myoGenerator_panel_PT_)
     bpy.utils.unregister_class(Muscle_Creation_Op)
     bpy.utils.unregister_class(Curve_Creator_Op)
