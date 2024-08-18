@@ -4,6 +4,7 @@ import sys
 import bpy
 import bmesh
 import mathutils
+from mathutils import Vector
 
 
 from AddonFolder import muscleCore, myoGenerator_panel, vertex_Counter
@@ -46,6 +47,7 @@ class Muscle_Name_Submition(bpy.types.Operator):
         return {'FINISHED'}
 
 def select_and_edit_object(obj):
+    bpy.ops.object.mode_set(mode='OBJECT')
     # Ensure the object is selected
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
@@ -125,8 +127,28 @@ def create_mesh_from_selected_faces(self, mesh_name):
     target_collection.objects.link(new_object)
     bpy.context.collection.objects.unlink(new_object)
 
+    # Set the new object as active
+    bpy.context.view_layer.objects.active = new_object
+    new_object.select_set(True)
+
+    # Switch to edit mode to remove doubles
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.remove_doubles(threshold=0.0001)
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.region_to_loop()
+    #separate the selected edges
+    bpy.ops.mesh.separate(type='SELECTED')
+
     # Switch back to object mode
     bpy.ops.object.mode_set(mode='OBJECT')
+    #rename the object 
+    #get the last object created
+    contour_object = bpy.context.selected_objects[-1]
+    mesh_name = objName + "_" + mesh_name
+    new_object.name = mesh_name
+    contour_object.name = mesh_name + "_contour"
+
 
     self.report({'INFO'}, f"New mesh '{mesh_name}' with selected faces created and added to collection '{objName}' inside 'muscles'")
     return {'FINISHED'}
@@ -183,9 +205,6 @@ class Muscle_Creation_Op(bpy.types.Operator):
         vertex_Counter.OverallVertexCount()
         return{'FINISHED'}
 
-
-from mathutils import Vector
-
 class Curve_Creator_Op(bpy.types.Operator):
     bl_idname = "view3d.curve_creator"
     bl_label = "Curve Creator"
@@ -201,8 +220,10 @@ class Curve_Creator_Op(bpy.types.Operator):
         target_collection = muscles_collection.children[objName]
 
         # Obtener los objetos origin e insertion
-        origin_object = target_collection.objects.get("origin")
-        insertion_object = target_collection.objects.get("insertion")
+        origin_object = target_collection.objects.get(objName + "_origin")
+        origin_contour_object = target_collection.objects.get(objName + "_origin_contour")
+        insertion_object = target_collection.objects.get(objName + "_insertion")
+        insertion_contour_object = target_collection.objects.get(objName + "_insertion_contour")
         if not origin_object or not insertion_object:
             self.report({'ERROR'}, "Origin or insertion object not found in the collection")
             return {'CANCELLED'}
@@ -212,31 +233,67 @@ class Curve_Creator_Op(bpy.types.Operator):
 
         # Calcular el centroide del objeto insertion
         insertion_centroid = self.calculate_centroid(insertion_object)
+        # Crear una nueva curva Bézier en la ubicación del origin_centroid
+        bpy.ops.curve.primitive_bezier_curve_add(radius=1, enter_editmode=False, align='WORLD', location=origin_centroid, scale=(1, 1, 1))
+        
+        # Obtener la referencia al objeto de la curva recién creada
+        curve_object = bpy.context.object
+        curve_object.name = "MuscleBezierCurve"
+        
+        # Obtener la referencia a los datos de la curva
+        curve_data = curve_object.data
+        bezier_spline = curve_data.splines[0]
+       
+        # Añadir un punto adicional para un total de 2 puntos (inicio y fin)
+        #bezier_spline.bezier_points.add(1)
+        
+        # Establecer las posiciones de los puntos Bézier
+        bezier_spline.bezier_points[0].co = (0, 0, 0)  # El primer punto ya está en origin_centroid
+        bezier_spline.bezier_points[1].co = insertion_centroid - origin_centroid  # Ajustar la posición relativa al origen
 
-        # Crear una nueva curva
-        curve_data = bpy.data.curves.new(name="MuscleCurve", type='CURVE')
-        curve_data.dimensions = '3D'
-        polyline = curve_data.splines.new('POLY')
-        polyline.points.add(10)  # Añadir 10 puntos adicionales para un total de 11 puntos (10 divisiones)
-        
-        # Calcular las posiciones intermedias
-        for i in range(11):
-            t = i / 10
-            x = origin_centroid[0] * (1 - t) + insertion_centroid[0] * t
-            y = origin_centroid[1] * (1 - t) + insertion_centroid[1] * t
-            z = origin_centroid[2] * (1 - t) + insertion_centroid[2] * t
-            polyline.points[i].co = (x, y, z, 1)
-        
-        # Crear un nuevo objeto con la curva
-        curve_object = bpy.data.objects.new("MuscleCurve", curve_data)
+                # Ajustar los manejadores para suavizar la curva
+        for point in bezier_spline.bezier_points:
+            point.handle_left_type = 'AUTO'
+            point.handle_right_type = 'AUTO'
         
         # Añadir la curva a la colección objName dentro de "muscles"
         target_collection.objects.link(curve_object)
-        #set the curve as active object
+        
+        # Establecer la curva como objeto activo
         bpy.context.view_layer.objects.active = curve_object
-        bpy.ops.object.mode_set(mode='EDIT')
+        curve_object.select_set(True)
 
-        self.report({'INFO'}, "Curve created successfully")
+        # Seleccionar solo el primer punto de la curva Bézier
+        bpy.context.view_layer.objects.active = curve_object
+        curve_object.select_set(True)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.curve.subdivide(number_cuts=10)
+        bpy.ops.curve.select_all(action='DESELECT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+
+        # Seleccionar el objeto de contorno de origen
+        origin_contour_object.select_set(True)
+        bpy.context.view_layer.objects.active = origin_contour_object
+
+        # Añadir modificador Screw al objeto de origen
+        bpy.ops.object.modifier_add(type='SCREW')
+        bpy.context.object.modifiers["Screw"].axis = 'X'
+        bpy.context.object.modifiers["Screw"].angle = 0
+        bpy.context.object.modifiers["Screw"].screw_offset = 10
+        bpy.context.object.modifiers["Screw"].iterations = 5
+
+        # Añadir modificador Curve al objeto de origen
+        bpy.ops.object.modifier_add(type='CURVE')
+        bpy.context.object.modifiers["Curve"].object = curve_object
+        bpy.context.object.modifiers["Curve"].deform_axis = 'POS_X'
+
+        self.report({'INFO'}, "Bezier curve created successfully")
+
+
+
+
+        self.report({'INFO'}, "Bezier curve created successfully")
         return {'FINISHED'}
 
     def calculate_centroid(self, obj):
