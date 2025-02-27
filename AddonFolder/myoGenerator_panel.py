@@ -81,11 +81,19 @@ class myoGenerator_panel_PT_(bpy.types.Panel):
         row = box.row()
         row.operator(
             "view3d.muscle_creation",
-            text="Match Attachment Vertex Counts")
+            text="Create muscle curve")
 
 
         row = box.row()
-        row.operator("view3d.curve_creator", text="Create Muscle Curve")
+        # add an input field for the number subvisions
+        row.prop(context.scene, "muscle_subdivisions", text="Subdivisions")
+
+        row = box.row()
+        #add resampling number  
+        row.prop(context.scene, "muscle_resampling", text="Resampling")
+
+        row = box.row()
+        row.operator("view3d.muscle_volume_creator", text="Create Muscle volume")
 
         layout.separator()
 

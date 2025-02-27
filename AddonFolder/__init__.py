@@ -20,7 +20,8 @@ from .myoGenerator_op import (Submit_Origin_Op, Submit_Insertion_Op, Calculate_V
                               Muscle_Creation_Op, Reset_Variables_Op,
                               Select_Insertion_Op, Muscle_Name_Submition,
                               Select_Origin_Op, SetBevel2_Op, SetBevel_Op,
-                              SetTilt_Op, Transform_To_Mesh_Op, Mirror_Cross_Section_Op)
+                              SetTilt_Op, Transform_To_Mesh_Op, Mirror_Cross_Section_Op, update_muscle_subdivision, update_muscle_resampling,
+                              Muscle_Volume_Creation_Op)
 from .myoGenerator_panel import myoGenerator_panel_PT_
 
 
@@ -42,6 +43,7 @@ def register():
     bpy.utils.register_class(Calculate_Volume_Op)
     bpy.utils.register_class(Reset_Variables_Op)
     bpy.utils.register_class(Mirror_Cross_Section_Op)
+    bpy.utils.register_class(Muscle_Volume_Creation_Op)
 
 
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
@@ -82,6 +84,23 @@ def register():
         name="Insertion Name",
         description="Insert insertion name",
         default='Insert insertion name'
+    )
+    bpy.types.Scene.muscle_subdivisions = bpy.props.IntProperty(
+        name="muscle_subdivisions",
+        description="Number of subdivisions",
+        default=10,
+        min=2,
+        max=100,
+        update=update_muscle_subdivision
+    )
+
+    bpy.types.Scene.muscle_resampling = bpy.props.IntProperty(
+        name="muscle_resampling",
+        description="Number resamplings for the attachment areas",
+        default= 32,
+        min=3,
+        max=300,
+        update= update_muscle_resampling
     )
 
     bpy.types.Scene.bevel = bpy.props.FloatProperty(
@@ -128,8 +147,14 @@ def unregister():
     bpy.utils.unregister_class(Calculate_Volume_Op)
     bpy.utils.unregister_class(Reset_Variables_Op)
     bpy.utils.unregister_class(Mirror_Cross_Section_Op)
+    bpy.utils.unregister_class(Muscle_Volume_Creation_Op)
+
 
     del bpy.types.Scene.muscle_Name
     del bpy.types.Scene.bevel
     del bpy.types.Scene.conf_path
     del bpy.types.Scene.file_name
+    del bpy.types.Scene.muscle_subdivisions
+    del bpy.types.Scene.origin_object
+    del bpy.types.Scene.insertion_object
+    del bpy.types.Scene.muscle_resampling

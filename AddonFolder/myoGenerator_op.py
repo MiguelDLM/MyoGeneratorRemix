@@ -149,6 +149,14 @@ def create_mesh_from_selected_faces(self, mesh_name):
     new_object.name = mesh_name
     contour_object.name = mesh_name + "_contour"
 
+    # Deselect everything and select the contour object
+    bpy.ops.object.select_all(action='DESELECT')
+    contour_object.select_set(True)
+    bpy.context.view_layer.objects.active = contour_object
+    # Convert the contour object to a curve
+    bpy.ops.object.convert(target='CURVE')
+
+
 
     self.report({'INFO'}, f"New mesh '{mesh_name}' with selected faces created and added to collection '{objName}' inside 'muscles'")
     return {'FINISHED'}
@@ -200,101 +208,6 @@ class Muscle_Creation_Op(bpy.types.Operator):
     bl_idname = "view3d.muscle_creation"
     bl_label = "Muscle Creation"
 
-    def equalize_vertex_counts(self, obj_a, obj_b):
-        """
-        Equalizes the vertex counts of two MESH objects by subdividing edges efficiently.
-        """
-        # Get vertex counts
-        count_a = len(obj_a.data.vertices)
-        count_b = len(obj_b.data.vertices)
-
-        # Calculate the difference
-        diff = abs(count_a - count_b)
-
-        if diff == 0:
-            print("Both objects already have the same number of vertices.")
-            return
-
-        # Determine which object needs subdivision
-        obj_to_subdivide = obj_a if count_a < count_b else obj_b
-
-        # Switch to Edit Mode
-        bpy.context.view_layer.objects.active = obj_to_subdivide
-        bpy.ops.object.mode_set(mode='EDIT')
-        bm = bmesh.from_edit_mesh(obj_to_subdivide.data)
-
-        # Subdivide edges evenly to match vertex counts
-        edges = bm.edges[:]
-
-        # Calculate how many cuts are needed per edge
-        total_edges = len(edges)
-        cuts_per_edge = diff // total_edges
-        extra_cuts = diff % total_edges  # Remainder
-
-        # Subdivide edges
-        if cuts_per_edge > 0:
-            bmesh.ops.subdivide_edges(bm, edges=edges, cuts=cuts_per_edge, use_grid_fill=True)
-
-        if extra_cuts > 0:
-            # Subdivide a subset of edges to distribute the remaining cuts
-            edges_subset = edges[:extra_cuts]
-            bmesh.ops.subdivide_edges(bm, edges=edges_subset, cuts=1, use_grid_fill=True)
-
-        # Update mesh and switch back to Object Mode
-        bmesh.update_edit_mesh(obj_to_subdivide.data)
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-        # Recalculate the vertex counts
-        new_count_a = len(obj_a.data.vertices)
-        new_count_b = len(obj_b.data.vertices)
-
-        print(f"Vertex counts after subdivision: {new_count_a}, {new_count_b}")
-
-    def reorder_vertices(self, obj):
-        """
-        Reorders the vertices of a MESH object for consistent indexing.
-        """
-        if obj.type != 'MESH':
-            return
-
-        # Switch to Edit Mode
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-
-        # Get BMesh representation
-        bm = bmesh.from_edit_mesh(obj.data)
-        bm.verts.ensure_lookup_table()
-
-        # Start from a vertex and traverse connected edges
-        vert_order = []
-        visited = set()
-
-        def traverse_vert(vert):
-            visited.add(vert)
-            vert_order.append(vert)
-            linked_verts = [e.other_vert(vert) for e in vert.link_edges if e.other_vert(vert) not in visited]
-            for v in linked_verts:
-                traverse_vert(v)
-
-        # Find a vertex with only two connected edges (start of open loop)
-        start_vert = None
-        for v in bm.verts:
-            if len(v.link_edges) <= 2:
-                start_vert = v
-                break
-        if not start_vert:
-            start_vert = bm.verts[0]
-
-        # Traverse vertices
-        traverse_vert(start_vert)
-
-        # Reassign indices
-        for i, v in enumerate(vert_order):
-            v.index = i
-
-        bmesh.update_edit_mesh(obj.data)
-        bpy.ops.object.mode_set(mode='OBJECT')
 
     def calculate_centroid_and_normal(self, obj):
         """
@@ -319,64 +232,70 @@ class Muscle_Creation_Op(bpy.types.Operator):
 
         return centroid_world, avg_normal_world
 
-    def create_nurbs_curve(self, start_point, end_point, start_normal, end_normal, muscle_name):
+    def create_bezier_curve(self, start_point, end_point, start_normal, end_normal, muscle_name):
         """
-        Creates a NURBS curve with multiple control points between two points, influenced by normals.
+        Creates a Bézier curve with multiple control points between two points, influenced by normals.
         """
-    
+        
         # Calculate length between points
         line_length = (end_point - start_point).length
         scale_factor = 0.1 * line_length
-    
+        
         # Normalize normals
         start_normal_unit = start_normal.normalized()
         end_normal_unit = end_normal.normalized()
-    
+        
         # Calculate intermediate control points
-        point1 = start_point + (start_normal_unit * scale_factor)
-        point3 = end_point + (end_normal_unit * scale_factor)
-        point2 = (point1 + point3) / 2
-    
+        handle1 = start_point + (start_normal_unit * scale_factor)
+        handle2 = end_point + (end_normal_unit * scale_factor)
+        
         # Create curve data
         curve_data = bpy.data.curves.new(name=muscle_name + "_curve_data", type='CURVE')
         curve_data.dimensions = '3D'
-    
-        # Create NURBS spline
-        spline = curve_data.splines.new(type='NURBS')
-        spline.points.add(count=4)
-        spline.points[0].co = (*start_point, 1)
-        spline.points[1].co = (*point1, 1)
-        spline.points[2].co = (*point2, 1)
-        spline.points[3].co = (*point3, 1)
-        spline.points[4].co = (*end_point, 1)
-        spline.order_u = 5
-    
+        
+        # Create Bézier spline
+        spline = curve_data.splines.new(type='BEZIER')
+        spline.bezier_points.add(count=1)  # Add one point (we already have one by default)
+        
+        # Set control points and handles
+        spline.bezier_points[0].co = start_point
+        spline.bezier_points[0].handle_right = handle1
+        spline.bezier_points[0].handle_left_type = 'AUTO'
+        
+        spline.bezier_points[1].co = end_point
+        spline.bezier_points[1].handle_left = handle2
+        spline.bezier_points[1].handle_right_type = 'AUTO'
+        
         # Create new curve object under a temporary name
         temp_name = "TEMP_" + muscle_name + "_curve"
         curve_obj = bpy.data.objects.new(temp_name, curve_data)
         bpy.context.collection.objects.link(curve_obj)
-    
+        
         # If there's already an object named <muscle_name>_curve, rename it
         existing_obj = bpy.data.objects.get(muscle_name + "_curve")
         if existing_obj:
             existing_obj.name = existing_obj.name + "_old"
-    
+        
         # Now rename to the desired final name
         curve_obj.name = muscle_name + "_curve"
         curve_data.name = muscle_name + "_curve_data"
-    
+        
         # Optionally refine the curve
         bpy.context.view_layer.objects.active = curve_obj
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.curve.select_all(action='SELECT')
-        bpy.ops.curve.subdivide(number_cuts=2)
+        bpy.ops.curve.subdivide(number_cuts=4)
         bpy.ops.object.mode_set(mode='OBJECT')
-        #clear location of the curve
+        
+        # Clear location of the curve
         bpy.ops.object.location_clear(clear_delta=False)
-        #set origin to geometry
-        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')    
-        # set geometry to origin
+        
+        # Set origin to geometry
+        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+        
+        # Set geometry to origin
         bpy.ops.object.location_clear(clear_delta=False)
+        
         return curve_obj
 
     def remap_objects(self, obj, target_collection):
@@ -386,9 +305,22 @@ class Muscle_Creation_Op(bpy.types.Operator):
         for collection in obj.users_collection:
             collection.objects.unlink(obj)
         target_collection.objects.link(obj)
-    def create_transition_mesh(self, obj_a, obj_b, curve_obj, muscle_name):
 
+    
+    def import_geometry_nodes(self, target_collection):
+        """
+        Append all geometry nodes from the same folder of the addon
+        """
+        # Get the path of the current addon
+        addon_path = os.path.dirname(os.path.realpath(__file__))
+        # Get the path of the geometry node file
+        geometry_node_path = os.path.join(addon_path, "geometry_node.blend")
         
+        # Append all geometry nodes
+        with bpy.data.libraries.load(geometry_node_path) as (data_from, data_to):
+            data_to.node_groups = [node_group for node_group in data_from.node_groups]
+    
+
     def execute(self, context):
         # Get the muscle name
         muscle_name = bpy.context.scene.muscle_Name
@@ -401,46 +333,163 @@ class Muscle_Creation_Op(bpy.types.Operator):
         target_collection = muscles_collection.children[muscle_name]
 
         # Get the origin and insertion objects
-        origin_obj = target_collection.objects.get(muscle_name + "_origin_contour")
-        insertion_obj = target_collection.objects.get(muscle_name + "_insertion_contour")
+        origin_obj = target_collection.objects.get(muscle_name + "_origin")
+        insertion_obj = target_collection.objects.get(muscle_name + "_insertion")
+
 
         if not origin_obj or not insertion_obj:
             self.report({'ERROR'}, "Required objects not found.")
             return {'CANCELLED'}
-
-        # Ensure both are meshes
-        if origin_obj.type != 'MESH':
-            bpy.context.view_layer.objects.active = origin_obj
-            bpy.ops.object.convert(target='MESH')
-        if insertion_obj.type != 'MESH':
-            bpy.context.view_layer.objects.active = insertion_obj
-            bpy.ops.object.convert(target='MESH')
-
-        # Reorder vertices
-        self.reorder_vertices(origin_obj)
-        self.reorder_vertices(insertion_obj)
-
-        # Equalize vertex counts
-        self.equalize_vertex_counts(origin_obj, insertion_obj)
 
         # Calculate centroids and normals
         origin_centroid, origin_normal = self.calculate_centroid_and_normal(origin_obj)
         insertion_centroid, insertion_normal = self.calculate_centroid_and_normal(insertion_obj)
 
         # Create NURBS curve with multiple control points
-        curve_obj = self.create_nurbs_curve(origin_centroid, insertion_centroid, origin_normal, insertion_normal, muscle_name)
+        curve_obj = self.create_bezier_curve(origin_centroid, insertion_centroid, origin_normal, insertion_normal, muscle_name)
 
+        # Duplicate the curve and set the name
+        muscle_obj = curve_obj.copy()
+        muscle_obj.data = curve_obj.data.copy()
+        muscle_obj.name = muscle_name + "_muscle"
+              
         # Move the curve to the target collection
         self.remap_objects(curve_obj, target_collection)
+        self.remap_objects(muscle_obj, target_collection)
 
-        # Create the transition mesh along the curve
-        #mesh_obj = self.create_transition_mesh(origin_obj, insertion_obj, curve_obj, muscle_name)
+        # Import the geometry node
+        self.import_geometry_nodes(target_collection)
 
-        # Move the mesh to the target collection
-        #self.remap_objects(mesh_obj, target_collection)
+        # Assign the geometry node loft-path to the muscle object
+        muscle_obj.modifiers.new(name="Geometry Nodes", type='NODES')
+        muscle_obj.modifiers["Geometry Nodes"].node_group = bpy.data.node_groups["Loft-path"]
+        # deselect all objects
+        bpy.ops.object.select_all(action='DESELECT')
+        # select the muscle object and set it as active
+        muscle_obj.select_set(True)
+        bpy.context.view_layer.objects.active = muscle_obj
+
+        # Configure the geometry node
+        bpy.context.object.modifiers["Geometry Nodes"]["Socket_0"] = bpy.data.objects[muscle_name + "_curve"]
+        bpy.context.object.modifiers["Geometry Nodes"]["Socket_3"] = bpy.data.objects[muscle_name + "_origin_contour"]
+        bpy.context.object.modifiers["Geometry Nodes"]["Socket_4"] = bpy.data.objects[muscle_name + "_insertion_contour"]
+        # clear the value of the input 2 and set the highest value
+        bpy.context.object.modifiers["Geometry Nodes"]["Input_2"] = 80
+        bpy.context.object.modifiers["Geometry Nodes"]["Input_3"] = 10
+        #change to edit mode
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+
 
         self.report({'INFO'}, "Muscle creation completed successfully.")
         return {'FINISHED'}
+
+def update_muscle_subdivision(self, context):
+    # Get the muscle name
+    muscle_name = context.scene.muscle_Name
+
+    # Access the 'muscles' collection and specific muscle collection
+    muscles_collection = bpy.data.collections.get("muscles")
+    if not muscles_collection:
+        print("Muscles collection not found")
+        return
+    if muscle_name not in muscles_collection.children:
+        print(f"Muscle collection '{muscle_name}' not found in muscles collection")
+        return
+    target_collection = muscles_collection.children[muscle_name]
+
+    # Get the muscle object
+    muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
+    if not muscle_obj:
+        print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
+        return
+
+    # Get the subdivision value
+    subdivision = context.scene.muscle_subdivisions
+
+    # Set the subdivision value
+    if "Geometry Nodes" in muscle_obj.modifiers:
+        muscle_obj.modifiers["Geometry Nodes"]["Input_3"] = subdivision
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    else:
+        print("Geometry Nodes modifier not found on muscle object")
+    
+def update_muscle_resampling(self, context):
+    # Get the muscle name
+    muscle_name = context.scene.muscle_Name
+
+    # Access the 'muscles' collection and specific muscle collection
+    muscles_collection = bpy.data.collections.get("muscles")
+    if not muscles_collection:
+        print("Muscles collection not found")
+        return
+    if muscle_name not in muscles_collection.children:
+        print(f"Muscle collection '{muscle_name}' not found in muscles collection")
+        return
+    target_collection = muscles_collection.children[muscle_name]
+
+    # Get the muscle object
+    muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
+    if not muscle_obj:
+        print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
+        return
+
+    # Get the resampling value
+    resampling = context.scene.muscle_resampling
+
+    # Set the resampling value
+    if "Geometry Nodes" in muscle_obj.modifiers:
+        muscle_obj.modifiers["Geometry Nodes"]["Input_2"] = resampling
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    else:
+        print("Geometry Nodes modifier not found on muscle object")
+
+class Muscle_Volume_Creation_Op(bpy.types.Operator):
+    bl_idname = "view3d.muscle_volume_creator"
+    bl_label = "Muscle Volume Creation"
+
+    def execute(self, context):
+        # Get the muscle name
+        muscle_name = context.scene.muscle_Name
+
+        # Access the 'muscles' collection and specific muscle collection
+        muscles_collection = bpy.data.collections.get("muscles")
+        if not muscles_collection:
+            print("Muscles collection not found")
+            return
+        if muscle_name not in muscles_collection.children:
+            print(f"Muscle collection '{muscle_name}' not found in muscles collection")
+            return
+        target_collection = muscles_collection.children[muscle_name]
+
+        # Get the muscle object
+        muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
+        if not muscle_obj:
+            print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
+            return
+
+        # Get the origin and insertion objects
+        origin_obj = target_collection.objects.get(muscle_name + "_origin")
+        insertion_obj = target_collection.objects.get(muscle_name + "_insertion")
+        if not origin_obj or not insertion_obj:
+            print("Origin or insertion objects not found")
+            return
+
+        # convert the muscle object to mesh
+        bpy.context.view_layer.objects.active = muscle_obj
+        bpy.ops.object.convert(target='MESH')
+        bpy.ops.object.editmode_toggle()
+        bpy.ops.mesh.select_non_manifold()
+        bpy.ops.mesh.edge_face_add()
+        # change to object mode
+        bpy.ops.object.editmode_toggle()
+
+        return {'FINISHED'}
+    
 
 
 class Curve_Creator_Op(bpy.types.Operator):
