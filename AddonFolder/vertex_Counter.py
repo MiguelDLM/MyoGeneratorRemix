@@ -3,7 +3,7 @@ import math
 import bmesh
 import bpy
 
-from AddonFolder import muscleCore
+from . import muscleCore
 
 
 def change_vertex_number(

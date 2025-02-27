@@ -1,6 +1,6 @@
 import bpy
 
-from AddonFolder import muscleCore
+from . import muscleCore
 
 parentMuscleGenerated = False
 originSubmitted = False
@@ -82,7 +82,7 @@ class myoGenerator_panel_PT_(bpy.types.Panel):
         row.operator(
             "view3d.muscle_creation",
             text="Match Attachment Vertex Counts")
-        row.enabled = (originSubmitted and insertionSubmitted)
+
 
         row = box.row()
         row.operator("view3d.curve_creator", text="Create Muscle Curve")

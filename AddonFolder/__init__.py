@@ -13,7 +13,7 @@
 
 import bpy
 
-from AddonFolder.muscleCore import curve_creator
+from .muscleCore import curve_creator
 
 from .myoGenerator_op import (Submit_Origin_Op, Submit_Insertion_Op, Calculate_Volume_Op,
                               Curve_Creator_Op, Join_Muscle_Op,

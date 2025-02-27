@@ -4,7 +4,7 @@
 @authors: Eva C. Herbst and Niccolo Fioritti
 this add-on enables generation of 3D muscles based on user selected origin and insertion areas and an adjustable muscle path
 """
-from AddonFolder import myoGenerator_op
+from . import myoGenerator_op
 import bpy
 import mathutils
 from mathutils import Vector, Matrix
@@ -27,7 +27,7 @@ muscleName = ''
 
 def make_empty(Muscle):
 
-    from AddonFolder import globalVariables
+    from . import globalVariables
 
     global muscleName
     globalVariables.muscleName = Muscle
@@ -61,7 +61,7 @@ def make_empty(Muscle):
 def create_attachment(index, Muscle):
     # also contains functions to recenter object, create boundary, and
     # calculate centroids and normals
-    from AddonFolder import globalVariables
+    from . import globalVariables
 
     attachmentNames = [' origin', ' insertion']
     attachmentName = attachmentNames[index]
@@ -576,7 +576,7 @@ def join_muscle(Muscle):
 
 def get_length():
 
-    from AddonFolder import globalVariables
+    from . import globalVariables
     length = 0
     try:
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -659,7 +659,7 @@ def measure_muscle_volume(obj):
 
 
 def updateVolumes():
-    from AddonFolder import globalVariables
+    from . import globalVariables
 
     try:
         bpy.ops.object.mode_set(mode='OBJECT')
