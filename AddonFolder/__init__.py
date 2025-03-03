@@ -13,15 +13,14 @@
 
 import bpy
 
-from AddonFolder.muscleCore import curve_creator
-
-from .myoGenerator_op import (Submit_Origin_Op, Submit_Insertion_Op, Calculate_Volume_Op,
-                              Curve_Creator_Op, Join_Muscle_Op,
-                              Muscle_Creation_Op, Reset_Variables_Op,
+from .myoGenerator_op import (Submit_Origin_Op, Submit_Insertion_Op,
+                              Muscle_Creation_Op, 
                               Select_Insertion_Op, Muscle_Name_Submition,
-                              Select_Origin_Op, SetBevel2_Op, SetBevel_Op,
-                              SetTilt_Op, Transform_To_Mesh_Op, Mirror_Cross_Section_Op)
-from .myoGenerator_panel import myoGenerator_panel_PT_
+                              Select_Origin_Op, update_muscle_subdivision, update_muscle_resampling,
+                              update_insertion_rotation, update_origin_rotation, Swap_Origin_Insertion_Op, Switch_Insertion_Vertex_Order_Op, Switch_Origin_Vertex_Order_Op,
+                              Muscle_Volume_Creation_Op, Calculate_Muscle_Parameters_Op, Next_Muscle_Op
+                              )
+from .myoGenerator_panel import MYOGENERATOR_PT_panel
 
 
 
@@ -31,17 +30,14 @@ def register():
     bpy.utils.register_class(Select_Insertion_Op)
     bpy.utils.register_class(Submit_Origin_Op)
     bpy.utils.register_class(Submit_Insertion_Op)
-    bpy.utils.register_class(myoGenerator_panel_PT_)
+    bpy.utils.register_class(MYOGENERATOR_PT_panel)
     bpy.utils.register_class(Muscle_Creation_Op)
-    bpy.utils.register_class(Curve_Creator_Op)
-    bpy.utils.register_class(Join_Muscle_Op)
-    bpy.utils.register_class(Transform_To_Mesh_Op)
-    bpy.utils.register_class(SetBevel_Op)
-    bpy.utils.register_class(SetBevel2_Op)
-    bpy.utils.register_class(SetTilt_Op)
-    bpy.utils.register_class(Calculate_Volume_Op)
-    bpy.utils.register_class(Reset_Variables_Op)
-    bpy.utils.register_class(Mirror_Cross_Section_Op)
+    bpy.utils.register_class(Muscle_Volume_Creation_Op)
+    bpy.utils.register_class(Swap_Origin_Insertion_Op)
+    bpy.utils.register_class(Switch_Insertion_Vertex_Order_Op)
+    bpy.utils.register_class(Switch_Origin_Vertex_Order_Op)
+    bpy.utils.register_class(Calculate_Muscle_Parameters_Op)
+    bpy.utils.register_class(Next_Muscle_Op)
 
 
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
@@ -83,31 +79,40 @@ def register():
         description="Insert insertion name",
         default='Insert insertion name'
     )
-
-    bpy.types.Scene.bevel = bpy.props.FloatProperty(
-        name="bevel",
-        min=0,
-        max=1,
-        update=SetBevel_Op.execute
-
+    bpy.types.Scene.muscle_subdivisions = bpy.props.IntProperty(
+        name="muscle_subdivisions",
+        description="Number of subdivisions",
+        default=10,
+        min=2,
+        max=100,
+        update=update_muscle_subdivision
     )
 
-    bpy.types.Scene.bevel2 = bpy.props.FloatProperty(
-
-        name="bevel2",
-        min=0,
-        max=1,
-        update=SetBevel2_Op.execute
-
+    bpy.types.Scene.muscle_resampling = bpy.props.IntProperty(
+        name="muscle_resampling",
+        description="Number resamplings for the attachment areas",
+        default= 32,
+        min=3,
+        max=300,
+        update= update_muscle_resampling
     )
 
-    bpy.types.Scene.tilt = bpy.props.FloatProperty(
+    bpy.types.Scene.origin_rotation = bpy.props.IntProperty(
+        name="origin_rotation",
+        description="Rotate the order of the vertex from the origin object",
+        default= 0,
+        min= 0,
+        max= 1000,
+        update= update_origin_rotation
+    )
 
-        name="tilt",
-        min=0,
-        max=360,
-        update=SetTilt_Op.execute
-
+    bpy.types.Scene.insertion_rotation = bpy.props.IntProperty(
+        name="insertion_rotation",
+        description="Rotate the order of the vertex from the insertion object",
+        default= 0,
+        min= 0,
+        max= 1000,
+        update= update_insertion_rotation
     )
 
 
@@ -117,19 +122,20 @@ def unregister():
     bpy.utils.unregister_class(Select_Insertion_Op)
     bpy.utils.unregister_class(Submit_Origin_Op)
     bpy.utils.unregister_class(Submit_Insertion_Op)
-    bpy.utils.unregister_class(myoGenerator_panel_PT_)
+    bpy.utils.unregister_class(MYOGENERATOR_PT_panel)
     bpy.utils.unregister_class(Muscle_Creation_Op)
-    bpy.utils.unregister_class(Curve_Creator_Op)
-    bpy.utils.unregister_class(Join_Muscle_Op)
-    bpy.utils.unregister_class(Transform_To_Mesh_Op)
-    bpy.utils.unregister_class(SetBevel_Op)
-    bpy.utils.unregister_class(SetBevel2_Op)
-    bpy.utils.unregister_class(SetTilt_Op)
-    bpy.utils.unregister_class(Calculate_Volume_Op)
-    bpy.utils.unregister_class(Reset_Variables_Op)
-    bpy.utils.unregister_class(Mirror_Cross_Section_Op)
+    bpy.utils.unregister_class(Muscle_Volume_Creation_Op)
+    bpy.utils.unregister_class(Swap_Origin_Insertion_Op)
+    bpy.utils.unregister_class(Switch_Insertion_Vertex_Order_Op)
+    bpy.utils.unregister_class(Switch_Origin_Vertex_Order_Op)
+    bpy.utils.unregister_class(Calculate_Muscle_Parameters_Op)
+    bpy.utils.unregister_class(Next_Muscle_Op)
+
 
     del bpy.types.Scene.muscle_Name
-    del bpy.types.Scene.bevel
     del bpy.types.Scene.conf_path
     del bpy.types.Scene.file_name
+    del bpy.types.Scene.muscle_subdivisions
+    del bpy.types.Scene.origin_object
+    del bpy.types.Scene.insertion_object
+    del bpy.types.Scene.muscle_resampling

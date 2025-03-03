@@ -1,19 +1,8 @@
 import bpy
 
-from AddonFolder import muscleCore
-
-parentMuscleGenerated = False
-originSubmitted = False
-insertionSubmitted = False
-vertexCountMatched = False
-curveCreated = False
-curveToMesh = False
-
-
-class myoGenerator_panel_PT_(bpy.types.Panel):
-
-    bl_idname = "MyoGeneratorRemix"
-    bl_label = "MyoGenerator: create muscle"
+class MYOGENERATOR_PT_panel(bpy.types.Panel):
+    bl_idname = "MYOGENERATOR_PT_panel"
+    bl_label = "MyoGeneratorRemix"
     bl_category = "MyoGeneratorRemix"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -77,55 +66,41 @@ class myoGenerator_panel_PT_(bpy.types.Panel):
         layout.separator()
 
         box = layout.box()
-        box.label(text="Muscle Curve Creation")
+        box.label(text="Muscle Creation")
         row = box.row()
-        row.operator(
-            "view3d.muscle_creation",
-            text="Match Attachment Vertex Counts")
-        row.enabled = (originSubmitted and insertionSubmitted)
+        row.operator("view3d.muscle_creation",text="Create muscle")
 
         row = box.row()
-        row.operator("view3d.curve_creator", text="Create Muscle Curve")
+        # add an input field for the number subvisions
+        row.prop(context.scene, "muscle_subdivisions", text="Subdivisions")
+
+        row = box.row()
+        #add resampling number  
+        row.prop(context.scene, "muscle_resampling", text="Resampling")
+
+        row = box.row()
+        row.prop(context.scene, "origin_rotation", text="Origin vertex rotation")
+
+        row = box.row()
+        row.prop(context.scene, "insertion_rotation", text="Insertion vertex rotation")
+
+        row = box.row()
+        row.operator("view3d.swap_origin_insertion", text="Swap Origin and Insertion")
+
+        row = box.row()
+        row.operator("view3d.switch_vertex_order_origin", text="Switch Origin Vertex Order")
+
+        row = box.row()
+        row.operator("view3d.switch_vertex_order_insertion", text="Switch Insertion Vertex Order")
+
+        row = box.row()
+        row.operator("view3d.muscle_volume_creator", text="Create Muscle volume")
 
         layout.separator()
-
+        
         box = layout.box()
-        box.label(text="Edit Muscle Curve")
+        box.label(text="Finish")
         row = box.row()
-        row.operator(
-            "view3d.mirror_cross_section",
-            text="Mirror Cross Section")
-        row.enabled = curveCreated
+        row.operator("view3d.next_muscle", text="Next Muscle")
         row = box.row()
-        row.prop(context.scene, "tilt", text="Set Tilt", slider=True)
-        row.enabled = curveCreated
-
-        row = box.row()
-        row.prop(context.scene, "bevel", text="Bevel Start", slider=True)
-        row.enabled = curveCreated
-
-        row = box.row()
-        row.prop(context.scene, "bevel2", text="Bevel End", slider=True)
-        row.enabled = curveCreated
-
-        layout.separator()
-
-        box = layout.box()
-        box.label(text="Muscle Finalization")
-        row = box.row()
-        row.operator("view3d.convert_to_mesh", text="Convert Curve To Mesh")
-        row.enabled = curveCreated
-
-        row = box.row()
-        row.operator("view3d.join_muscle", text="Join Muscle")
-        row.enabled = curveToMesh
-
-        layout.separator()
-
-        row = layout.row()
-        row.operator("view3d.reset_variables", text="Next Muscle")
-
-        layout.separator()
-
-        row = layout.row()
-        row.operator("view3d.calculate_volume", text="Calculate Volumes")
+        row.operator("view3d.calculate_muscle_parameters", text="Calculate Muscle Parameters")
