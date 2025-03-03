@@ -16,7 +16,7 @@ Díaz de León-Muñoz, E. M. (2025). MyoGeneratorRemix: A Blender Add-On for Cre
 
 The curve is not being configured correctly in the Geometry Nodes, for this reason, the user must configure the curve manually by selecting the *muscle object* and going to *Modifiers* in the *Properties Panel* and selecting the *Curve* option in the *Geometry Nodes* modifier. The Curve is already there, the user only needs to select it and press *Enter*.
 
-![Curve Fix](curve_fix.png)
+![Curve Fix](https://github.com/MiguelDLM/MyoGeneratorRemix/blob/main/curve-fix.png)
 ## 
 
 ## Output of Add-On
@@ -38,7 +38,7 @@ The curve is not being configured correctly in the Geometry Nodes, for this reas
 
 ## Summary of Add-on Steps
 
-![AddOn](https://github.com/evaherbst/MyoGenerator/blob/main/Myogenerator_Addon_Fig_lowres.png)
+![AddOn](https://github.com/MiguelDLM/MyoGeneratorRemix/blob/main/Myogenerator_Addon_Fig_lowres.png)
 
 1. User enters folder and file name for saving data.
 2. User enters muscle name
