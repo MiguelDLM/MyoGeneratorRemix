@@ -2,7 +2,7 @@ import bpy
 
 class MYOGENERATOR_PT_panel(bpy.types.Panel):
     bl_idname = "MYOGENERATOR_PT_panel"
-    bl_label = "MyoGenerator: create muscle"
+    bl_label = "MyoGeneratorRemix"
     bl_category = "MyoGeneratorRemix"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
