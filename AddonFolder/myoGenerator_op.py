@@ -220,7 +220,6 @@ class Muscle_Creation_Op(bpy.types.Operator):
     bl_idname = "view3d.muscle_creation"
     bl_label = "Muscle Creation"
 
-
     def calculate_centroid_and_normal(self, obj):
         """
         Calculates the centroid and average normal of an object based on its vertices and faces.
@@ -242,82 +241,67 @@ class Muscle_Creation_Op(bpy.types.Operator):
 
         avg_normal_world = obj.matrix_world.to_3x3() @ avg_normal  # Transform to world coordinates
 
+
         return centroid_world, avg_normal_world
 
-    
     def create_bezier_curve(self, start_point, end_point, start_normal, end_normal, muscle_name):
         """
-        Crea una curva Bézier entre start_point y end_point,
-        usando las normales para orientar los handles de forma coherente.
+        Crea una NURBS path con 5 puntos para representar el músculo, 
+        posicionándolos según la orientación de start_point/end_point y sus normales.
         """
-    
-        # Calcula el vector dirección (tangente)
-        direction = end_point - start_point
-        line_length = direction.length
+        line_length = (end_point - start_point).length
         if line_length == 0:
             line_length = 0.0001
-        direction.normalize()
     
-        # Proyecta las normales en el plano perpendicular a "direction"
-        # De esta forma, cada normal queda “ortogonal” a la tangente,
-        # evitando que arrastre una componente en la dirección entre los puntos.
-        def project_normal_onto_plane(normal, plane_normal):
-            # Elimina la componente en la dirección de plane_normal
-            return normal - plane_normal * normal.dot(plane_normal)
+        # Escala de la influencia de las normales
+        scale_factor = 0.1 * line_length
     
-        start_normal_orth = project_normal_onto_plane(start_normal, direction).normalized()
-        end_normal_orth = project_normal_onto_plane(end_normal, direction).normalized()
+        # Normaliza las normales para usarlas en cálculo de puntos intermedios
+        if start_normal.length == 0:
+            start_normal = Vector((0, 0, 1))
+        if end_normal.length == 0:
+            end_normal = Vector((0, 0, 1))
+        start_normal_unit = start_normal.normalized()
+        end_normal_unit = end_normal.normalized()
     
-        # Ajusta la magnitud de la influencia de las normales en la ubicación de los handles
-        scale_factor = 0.2 * line_length
+        # Calcula puntos intermedios
+        point1 = start_point + (start_normal_unit * scale_factor)
+        point3 = end_point + (end_normal_unit * scale_factor)
+        mid_point = Vector((
+            (point1.x + point3.x) / 2.0,
+            (point1.y + point3.y) / 2.0,
+            (point1.z + point3.z) / 2.0
+        ))
     
-        # Calcula los manejadores (handles) para cada extremo
-        # El handle se ubica a partir del punto de inicio/fin + la normal proyectada * escala
-        handle1 = start_point + start_normal_orth * scale_factor
-        handle2 = end_point + end_normal_orth * scale_factor
-    
-        # Crea la curva y su spline Bézier
-        curve_data = bpy.data.curves.new(name=muscle_name + "_curve_data", type='CURVE')
-        curve_data.dimensions = '3D'
-        spline = curve_data.splines.new(type='BEZIER')
-        spline.bezier_points.add(count=1)  # ya existe un punto por defecto, se agrega uno más
-    
-        # Asigna coordenadas/handles de los dos puntos Bézier
-        # Punto de inicio
-        spline.bezier_points[0].co = start_point
-        spline.bezier_points[0].handle_right = handle1
-        spline.bezier_points[0].handle_left_type = 'AUTO'
-        # Punto final
-        spline.bezier_points[1].co = end_point
-        spline.bezier_points[1].handle_left = handle2
-        spline.bezier_points[1].handle_right_type = 'AUTO'
-    
-        # Crea el objeto con la curva
-        temp_name = "TEMP_" + muscle_name + "_curve"
-        curve_obj = bpy.data.objects.new(temp_name, curve_data)
-        bpy.context.collection.objects.link(curve_obj)
-    
-        # Renombra si existe uno anterior
-        existing_obj = bpy.data.objects.get(muscle_name + "_curve")
-        if existing_obj:
-            existing_obj.name = existing_obj.name + "_old"
-    
-        # Nombramos al objeto y a los datos como deseamos
+        # Crea un NURBS path con 5 puntos
+        bpy.ops.curve.primitive_nurbs_path_add(enter_editmode=False, align='WORLD')
+        curve_obj = bpy.context.view_layer.objects.active
         curve_obj.name = muscle_name + "_curve"
-        curve_data.name = muscle_name + "_curve_data"
+        spline = curve_obj.data.splines[0]  # Hay un solo spline por defecto con 5 puntos
     
-        # (Opcional) subdividir la curva para suavizarla y pasar a modo objeto
-        bpy.context.view_layer.objects.active = curve_obj
+        # Asigna coordenadas a cada punto (el cuarto punto es index 4)
+        spline.points[0].co = (start_point.x, start_point.y, start_point.z, 1)
+        spline.points[1].co = (point1.x, point1.y, point1.z, 1)
+        spline.points[2].co = (mid_point.x, mid_point.y, mid_point.z, 1)
+        spline.points[3].co = (point3.x, point3.y, point3.z, 1)
+        spline.points[4].co = (end_point.x, end_point.y, end_point.z, 1)
+    
+        # Subdivide algunos puntos en modo edición
         bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.curve.select_all(action='SELECT')
-        bpy.ops.curve.subdivide(number_cuts=1)
+        bpy.ops.curve.select_all(action='DESELECT')
+        # Subdivide entre [1] y [2]
+        spline.points[1].select = True
+        spline.points[2].select = True
+        bpy.ops.curve.subdivide()
+        # Subdivide entre [3] y [4]
+        bpy.ops.curve.select_all(action='DESELECT')
+        spline.points[3].select = True
+        spline.points[4].select = True
+        bpy.ops.curve.subdivide()
         bpy.ops.object.mode_set(mode='OBJECT')
     
-        # Limpia location y ajusta el origen a la geometría
-        bpy.ops.object.location_clear(clear_delta=False)
+        # Ajusta el origen a la geometría
         bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
-        bpy.ops.object.location_clear(clear_delta=False)
-    
         return curve_obj
 
     def remap_objects(self, obj, target_collection):
@@ -328,7 +312,6 @@ class Muscle_Creation_Op(bpy.types.Operator):
             collection.objects.unlink(obj)
         target_collection.objects.link(obj)
 
-    
     def import_geometry_nodes(self, target_collection):
         """
         Append all geometry nodes from the same folder of the addon
@@ -338,11 +321,16 @@ class Muscle_Creation_Op(bpy.types.Operator):
         # Get the path of the geometry node file
         geometry_node_path = os.path.join(addon_path, "geometry_node.blend")
         
+        # Check if the node group already exists
+        node_group_name = "Loft-path"  # Replace with the actual name of your node group
+        if node_group_name in bpy.data.node_groups:
+            print(f"Node group '{node_group_name}' already exists. Skipping import.")
+            return
+        
         # Append all geometry nodes
         with bpy.data.libraries.load(geometry_node_path) as (data_from, data_to):
             data_to.node_groups = [node_group for node_group in data_from.node_groups]
     
-
     def execute(self, context):
         # Get the muscle name
         muscle_name = bpy.context.scene.muscle_Name
@@ -416,69 +404,83 @@ class Muscle_Creation_Op(bpy.types.Operator):
         self.report({'INFO'}, "Muscle creation completed successfully.")
         return {'FINISHED'}
 
+def with_temp_object_active(context, obj, action):
+    """
+    Helper function to:
+      1. Store the current active object and mode
+      2. Set 'obj' as active, switch to OBJECT mode
+      3. Run 'action' callback
+      4. Restore original active object and mode
+    """
+    original_active_obj = context.view_layer.objects.active
+    original_mode = original_active_obj.mode if original_active_obj else 'OBJECT'
+
+    # Switch to object mode and select our target
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    context.view_layer.objects.active = obj
+
+    # Perform the custom action
+    action()
+
+    # Restore original selection and mode
+    bpy.ops.object.select_all(action='DESELECT')
+    if original_active_obj:
+        original_active_obj.select_set(True)
+        context.view_layer.objects.active = original_active_obj
+        try:
+            bpy.ops.object.mode_set(mode=original_mode)
+        except RuntimeError:
+            print("Couldn't restore previous mode (possibly invalid).")
+
+
 def update_muscle_subdivision(self, context):
-    # Get the muscle name
     muscle_name = context.scene.muscle_Name
-
-    # Access the 'muscles' collection and specific muscle collection
     muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection:
-        print("Muscles collection not found")
+    if not muscles_collection or (muscle_name not in muscles_collection.children):
+        print(f"Muscle collection '{muscle_name}' not found.")
         return
-    if muscle_name not in muscles_collection.children:
-        print(f"Muscle collection '{muscle_name}' not found in muscles collection")
-        return
-    target_collection = muscles_collection.children[muscle_name]
-
-    # Get the muscle object
-    muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
+    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
     if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
+        print(f"Muscle object '{muscle_name}_muscle' not found.")
         return
 
-    # Get the subdivision value
     subdivision = context.scene.muscle_subdivisions
 
-    # Set the subdivision value
-    if "Geometry Nodes" in muscle_obj.modifiers:
-        muscle_obj.modifiers["Geometry Nodes"]["Input_3"] = subdivision
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.object.mode_set(mode='OBJECT')
+    def subdiv_action():
+        if "Geometry Nodes" in muscle_obj.modifiers:
+            muscle_obj.modifiers["Geometry Nodes"]["Input_3"] = subdivision
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.object.mode_set(mode='OBJECT')
+        else:
+            print("Geometry Nodes modifier not found on muscle object")
 
-    else:
-        print("Geometry Nodes modifier not found on muscle object")
-    
+    with_temp_object_active(context, muscle_obj, subdiv_action)
+
+
 def update_muscle_resampling(self, context):
-    # Get the muscle name
     muscle_name = context.scene.muscle_Name
-
-    # Access the 'muscles' collection and specific muscle collection
     muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection:
-        print("Muscles collection not found")
+    if not muscles_collection or (muscle_name not in muscles_collection.children):
+        print(f"Muscle collection '{muscle_name}' not found.")
         return
-    if muscle_name not in muscles_collection.children:
-        print(f"Muscle collection '{muscle_name}' not found in muscles collection")
-        return
-    target_collection = muscles_collection.children[muscle_name]
-
-    # Get the muscle object
-    muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
+    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
     if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
+        print(f"Muscle object '{muscle_name}_muscle' not found.")
         return
 
-    # Get the resampling value
     resampling = context.scene.muscle_resampling
 
-    # Set the resampling value
-    if "Geometry Nodes" in muscle_obj.modifiers:
-        muscle_obj.modifiers["Geometry Nodes"]["Input_2"] = resampling
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.object.mode_set(mode='OBJECT')
+    def resample_action():
+        if "Geometry Nodes" in muscle_obj.modifiers:
+            muscle_obj.modifiers["Geometry Nodes"]["Input_2"] = resampling
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.object.mode_set(mode='OBJECT')
+        else:
+            print("Geometry Nodes modifier not found on muscle object")
 
-    else:
-        print("Geometry Nodes modifier not found on muscle object")
+    with_temp_object_active(context, muscle_obj, resample_action)
 
 class Muscle_Volume_Creation_Op(bpy.types.Operator):
     bl_idname = "view3d.muscle_volume_creator"
@@ -521,6 +523,7 @@ class Muscle_Volume_Creation_Op(bpy.types.Operator):
         bpy.context.view_layer.objects.active = muscle_obj
         bpy.ops.object.convert(target='MESH')
         bpy.ops.object.editmode_toggle()
+        bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='EDGE')
         bpy.ops.mesh.select_non_manifold()
         bpy.ops.mesh.edge_face_add()
         # change to object mode
@@ -529,179 +532,147 @@ class Muscle_Volume_Creation_Op(bpy.types.Operator):
         return {'FINISHED'}
     
 def update_origin_rotation(self, context):
-        # Get the muscle name
     muscle_name = context.scene.muscle_Name
-
-    # Access the 'muscles' collection and specific muscle collection
     muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection:
-        print("Muscles collection not found")
+    if not muscles_collection or (muscle_name not in muscles_collection.children):
+        print(f"Muscle collection '{muscle_name}' not found.")
         return
-    if muscle_name not in muscles_collection.children:
-        print(f"Muscle collection '{muscle_name}' not found in muscles collection")
-        return
-    target_collection = muscles_collection.children[muscle_name]
-
-    # Get the muscle object
-    muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
+    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
     if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
+        print(f"Muscle object '{muscle_name}_muscle' not found.")
         return
 
-    # Get the rotation value
     origin_rotation = context.scene.origin_rotation
 
-    # Set the resampling value
-    if "Geometry Nodes" in muscle_obj.modifiers:
-        muscle_obj.modifiers["Geometry Nodes"]["Socket_1"] = origin_rotation
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.object.mode_set(mode='OBJECT')
+    def origin_rot_action():
+        if "Geometry Nodes" in muscle_obj.modifiers:
+            muscle_obj.modifiers["Geometry Nodes"]["Socket_1"] = origin_rotation
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.object.mode_set(mode='OBJECT')
+        else:
+            print("Geometry Nodes modifier not found on muscle object")
 
-    else:
-        print("Geometry Nodes modifier not found on muscle object")
+    with_temp_object_active(context, muscle_obj, origin_rot_action)
 
 def update_insertion_rotation(self, context):
-            # Get the muscle name
     muscle_name = context.scene.muscle_Name
-
-    # Access the 'muscles' collection and specific muscle collection
     muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection:
-        print("Muscles collection not found")
+    if not muscles_collection or (muscle_name not in muscles_collection.children):
+        print(f"Muscle collection '{muscle_name}' not found.")
         return
-    if muscle_name not in muscles_collection.children:
-        print(f"Muscle collection '{muscle_name}' not found in muscles collection")
-        return
-    target_collection = muscles_collection.children[muscle_name]
-
-    # Get the muscle object
-    muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
+    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
     if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
+        print(f"Muscle object '{muscle_name}_muscle' not found.")
         return
 
-    # Get the rotation value
     insertion_rotation = context.scene.insertion_rotation
 
-    # Set the resampling value
-    if "Geometry Nodes" in muscle_obj.modifiers:
-        muscle_obj.modifiers["Geometry Nodes"]["Socket_2"] = insertion_rotation
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.object.mode_set(mode='OBJECT')
+    def insertion_rot_action():
+        if "Geometry Nodes" in muscle_obj.modifiers:
+            muscle_obj.modifiers["Geometry Nodes"]["Socket_2"] = insertion_rotation
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.object.mode_set(mode='OBJECT')
+        else:
+            print("Geometry Nodes modifier not found on muscle object")
 
-    else:
-        print("Geometry Nodes modifier not found on muscle object")
-
+    with_temp_object_active(context, muscle_obj, insertion_rot_action)
 
 class Swap_Origin_Insertion_Op(bpy.types.Operator):
     bl_idname = "view3d.swap_origin_insertion"
     bl_label = "Swap Origin and Insertion"
 
     def execute(self, context):
-        # Get the muscle name
         muscle_name = context.scene.muscle_Name
-
-        # Access the 'muscles' collection and specific muscle collection
         muscles_collection = bpy.data.collections.get("muscles")
         if not muscles_collection:
             print("Muscles collection not found")
-            return
+            return {'CANCELLED'}
         if muscle_name not in muscles_collection.children:
             print(f"Muscle collection '{muscle_name}' not found in muscles collection")
-            return
+            return {'CANCELLED'}
         target_collection = muscles_collection.children[muscle_name]
 
-        # Get the muscle object
         muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
         if not muscle_obj:
             print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
-            return
-        
-        #Change the value of the socket 5 in the geometry node to false or true depending on the current value
-        if "Geometry Nodes" in muscle_obj.modifiers:
-            if muscle_obj.modifiers["Geometry Nodes"]["Socket_5"]:
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_5"] = False
+            return {'CANCELLED'}
+
+        def swap_action():
+            if "Geometry Nodes" in muscle_obj.modifiers:
+                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_5"]
+                muscle_obj.modifiers["Geometry Nodes"]["Socket_5"] = not socket_val
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.object.mode_set(mode='OBJECT')
             else:
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_5"] = True
+                print("Geometry Nodes modifier not found on muscle object")
 
-        #change to edit mode and back to object mode
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.object.mode_set(mode='OBJECT')
-
+        with_temp_object_active(context, muscle_obj, swap_action)
         return {'FINISHED'}
+
 
 class Switch_Origin_Vertex_Order_Op(bpy.types.Operator):
     bl_idname = "view3d.switch_vertex_order_origin"
     bl_label = "Switch Origin Vertex Order"
 
     def execute(self, context):
-        # Get the muscle name
         muscle_name = context.scene.muscle_Name
-
-        # Access the 'muscles' collection and specific muscle collection
         muscles_collection = bpy.data.collections.get("muscles")
         if not muscles_collection:
             print("Muscles collection not found")
-            return
+            return {'CANCELLED'}
         if muscle_name not in muscles_collection.children:
             print(f"Muscle collection '{muscle_name}' not found in muscles collection")
-            return
+            return {'CANCELLED'}
         target_collection = muscles_collection.children[muscle_name]
 
-        # Get the muscle object
         muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
         if not muscle_obj:
             print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
-            return
-        
-        #Change the value of the socket 6 in the geometry node to false or true depending on the current value
-        if "Geometry Nodes" in muscle_obj.modifiers:
-            if muscle_obj.modifiers["Geometry Nodes"]["Socket_6"]:
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_6"] = False
+            return {'CANCELLED'}
+
+        def switch_origin_action():
+            if "Geometry Nodes" in muscle_obj.modifiers:
+                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_6"]
+                muscle_obj.modifiers["Geometry Nodes"]["Socket_6"] = not socket_val
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.object.mode_set(mode='OBJECT')
             else:
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_6"] = True
+                print("Geometry Nodes modifier not found on muscle object")
 
-                #change to edit mode and back to object mode
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.object.mode_set(mode='OBJECT')
-
+        with_temp_object_active(context, muscle_obj, switch_origin_action)
         return {'FINISHED'}
-    
+
+
 class Switch_Insertion_Vertex_Order_Op(bpy.types.Operator):
     bl_idname = "view3d.switch_vertex_order_insertion"
     bl_label = "Switch Insertion Vertex Order"
 
     def execute(self, context):
-        # Get the muscle name
         muscle_name = context.scene.muscle_Name
-
-        # Access the 'muscles' collection and specific muscle collection
         muscles_collection = bpy.data.collections.get("muscles")
         if not muscles_collection:
             print("Muscles collection not found")
-            return
+            return {'CANCELLED'}
         if muscle_name not in muscles_collection.children:
             print(f"Muscle collection '{muscle_name}' not found in muscles collection")
-            return
+            return {'CANCELLED'}
         target_collection = muscles_collection.children[muscle_name]
 
-        # Get the muscle object
         muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
         if not muscle_obj:
             print(f"Muscle object '{muscle_name}_muscle' not found in collection '{muscle_name}'")
-            return
-        
-        #Change the value of the socket 7 in the geometry node to false or true depending on the current value
-        if "Geometry Nodes" in muscle_obj.modifiers:
-            if muscle_obj.modifiers["Geometry Nodes"]["Socket_7"]:
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_7"] = False
+            return {'CANCELLED'}
+
+        def switch_insertion_action():
+            if "Geometry Nodes" in muscle_obj.modifiers:
+                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_7"]
+                muscle_obj.modifiers["Geometry Nodes"]["Socket_7"] = not socket_val
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.object.mode_set(mode='OBJECT')
             else:
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_7"] = True
+                print("Geometry Nodes modifier not found on muscle object")
 
-                #change to edit mode and back to object mode
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.object.mode_set(mode='OBJECT')
-
+        with_temp_object_active(context, muscle_obj, switch_insertion_action)
         return {'FINISHED'}
 
 class Next_Muscle_Op(bpy.types.Operator):
@@ -716,6 +687,8 @@ class Next_Muscle_Op(bpy.types.Operator):
         bpy.ops.object.mode_set(mode='OBJECT')
         # Deselect all objects
         bpy.ops.object.select_all(action='DESELECT')
+
+        return {'FINISHED'}
 
 class Calculate_Muscle_Parameters_Op(bpy.types.Operator):
     bl_idname = "view3d.calculate_muscle_parameters"
