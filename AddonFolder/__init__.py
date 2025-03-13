@@ -13,13 +13,16 @@
 
 import bpy
 
-from .myoGenerator_op import (Submit_Origin_Op, Submit_Insertion_Op,
-                              Muscle_Creation_Op, 
-                              Select_Insertion_Op, Muscle_Name_Submition,
-                              Select_Origin_Op, update_muscle_subdivision, update_muscle_resampling,
-                              update_insertion_rotation, update_origin_rotation, Swap_Origin_Insertion_Op, Switch_Insertion_Vertex_Order_Op, Switch_Origin_Vertex_Order_Op,
-                              Muscle_Volume_Creation_Op, Calculate_Muscle_Parameters_Op, Next_Muscle_Op
-                              )
+from .muscle_selection import (Muscle_Name_Submition, Select_Origin_Op,
+                              Select_Insertion_Op, Submit_Origin_Op,
+                              Submit_Insertion_Op, Next_Muscle_Op)
+from .muscle_creation import (Muscle_Creation_Op, Muscle_Volume_Creation_Op)
+from .muscle_modifications import (Swap_Origin_Insertion_Op, 
+                                 Switch_Insertion_Vertex_Order_Op, 
+                                 Switch_Origin_Vertex_Order_Op)
+from .muscle_parameters import Calculate_Muscle_Parameters_Op
+from .muscle_utilities import (update_muscle_subdivision, update_muscle_resampling,
+                             update_insertion_rotation, update_origin_rotation)
 from .myoGenerator_panel import MYOGENERATOR_PT_panel
 
 
@@ -139,3 +142,7 @@ def unregister():
     del bpy.types.Scene.origin_object
     del bpy.types.Scene.insertion_object
     del bpy.types.Scene.muscle_resampling
+    del bpy.types.Scene.origin_Name
+    del bpy.types.Scene.insertion_Name
+    del bpy.types.Scene.origin_rotation
+    del bpy.types.Scene.insertion_rotation
