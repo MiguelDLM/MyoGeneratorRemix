@@ -175,7 +175,7 @@ def update_muscle_subdivision(self, context):
 
     def subdiv_action():
         if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Input_3"] = subdivision
+            muscle_obj.modifiers["Geometry Nodes"]["Socket_3"] = subdivision
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.object.mode_set(mode='OBJECT')
         else:
@@ -198,7 +198,7 @@ def update_muscle_resampling(self, context):
 
     def resample_action():
         if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Input_2"] = resampling
+            muscle_obj.modifiers["Geometry Nodes"]["Socket_2"] = resampling
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.object.mode_set(mode='OBJECT')
         else:
@@ -221,7 +221,7 @@ def update_origin_rotation(self, context):
 
     def origin_rot_action():
         if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Socket_1"] = origin_rotation
+            muscle_obj.modifiers["Geometry Nodes"]["Socket_8"] = origin_rotation
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.object.mode_set(mode='OBJECT')
         else:
@@ -244,7 +244,7 @@ def update_insertion_rotation(self, context):
 
     def insertion_rot_action():
         if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Socket_2"] = insertion_rotation
+            muscle_obj.modifiers["Geometry Nodes"]["Socket_9"] = insertion_rotation
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.object.mode_set(mode='OBJECT')
         else:

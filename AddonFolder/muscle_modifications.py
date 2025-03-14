@@ -24,8 +24,8 @@ class Swap_Origin_Insertion_Op(bpy.types.Operator):
 
         def swap_action():
             if "Geometry Nodes" in muscle_obj.modifiers:
-                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_5"]
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_5"] = not socket_val
+                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_12"]
+                muscle_obj.modifiers["Geometry Nodes"]["Socket_12"] = not socket_val
                 bpy.ops.object.mode_set(mode='EDIT')
                 bpy.ops.object.mode_set(mode='OBJECT')
             else:
@@ -57,8 +57,8 @@ class Switch_Origin_Vertex_Order_Op(bpy.types.Operator):
 
         def switch_origin_action():
             if "Geometry Nodes" in muscle_obj.modifiers:
-                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_6"]
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_6"] = not socket_val
+                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_13"]
+                muscle_obj.modifiers["Geometry Nodes"]["Socket_13"] = not socket_val
                 bpy.ops.object.mode_set(mode='EDIT')
                 bpy.ops.object.mode_set(mode='OBJECT')
             else:
@@ -90,8 +90,8 @@ class Switch_Insertion_Vertex_Order_Op(bpy.types.Operator):
 
         def switch_insertion_action():
             if "Geometry Nodes" in muscle_obj.modifiers:
-                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_7"]
-                muscle_obj.modifiers["Geometry Nodes"]["Socket_7"] = not socket_val
+                socket_val = muscle_obj.modifiers["Geometry Nodes"]["Socket_14"]
+                muscle_obj.modifiers["Geometry Nodes"]["Socket_14"] = not socket_val
                 bpy.ops.object.mode_set(mode='EDIT')
                 bpy.ops.object.mode_set(mode='OBJECT')
             else:
