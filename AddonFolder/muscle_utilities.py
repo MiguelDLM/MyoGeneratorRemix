@@ -6,18 +6,57 @@ def select_and_edit_object(obj):
     """
     Set up an object for face selection in edit mode
     """
-    # Ensure the object is selected
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
+    # Ensure we have a valid context for operations
+    if not obj or obj.type != 'MESH':
+        return
+    
+    # Deselect all objects manually (safer than using operator)
+    for scene_obj in bpy.context.scene.objects:
+        scene_obj.select_set(False)
+    
+    # Set the object as active and selected
     bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.mode_set(mode='OBJECT')
+    obj.select_set(True)
+    
+    # Ensure we're in object mode before doing mode operations
+    if bpy.context.mode != 'OBJECT':
+        try:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        except RuntimeError:
+            pass
 
     # Use a temporary override context to ensure the mode set operation is valid
-    with bpy.context.temp_override(active_object=obj):
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_mode(type='FACE')
-        bpy.ops.wm.tool_set_by_id(name="builtin.select_lasso", space_type='VIEW_3D')
-        bpy.ops.mesh.select_all(action='DESELECT')
+    try:
+        # Find a 3D viewport for proper context
+        view_3d_area = None
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    view_3d_area = area
+                    break
+            if view_3d_area:
+                break
+        
+        if view_3d_area:
+            with bpy.context.temp_override(window=window, area=view_3d_area, active_object=obj):
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_mode(type='FACE')
+                try:
+                    bpy.ops.wm.tool_set_by_id(name="builtin.select_lasso", space_type='VIEW_3D')
+                except RuntimeError:
+                    pass  # Tool setting might fail, but that's OK
+                bpy.ops.mesh.select_all(action='DESELECT')
+        else:
+            # Fallback without operators
+            bpy.ops.object.mode_set(mode='EDIT')
+            
+    except RuntimeError as e:
+        print(f"Warning: Could not set up edit mode properly: {e}")
+        # Fallback: at least try to get into edit mode
+        try:
+            bpy.ops.object.mode_set(mode='EDIT')
+        except RuntimeError:
+            pass
 
 def with_temp_object_active(context, obj, action):
     """
@@ -27,230 +66,41 @@ def with_temp_object_active(context, obj, action):
       3. Run 'action' callback
       4. Restore original active object and mode
     """
+    if not obj:
+        return
+        
     original_active_obj = context.view_layer.objects.active
     original_mode = original_active_obj.mode if original_active_obj else 'OBJECT'
 
-    # Switch to object mode and select our target
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    context.view_layer.objects.active = obj
+    try:
+        # Switch to object mode and select our target
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Deselect all and select target
+        for scene_obj in context.scene.objects:
+            scene_obj.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
 
-    # Perform the custom action
-    action()
+        # Perform the custom action
+        action()
 
-    # Restore original selection and mode
-    bpy.ops.object.select_all(action='DESELECT')
-    if original_active_obj:
-        original_active_obj.select_set(True)
-        context.view_layer.objects.active = original_active_obj
+    except Exception as e:
+        print(f"Error in with_temp_object_active: {e}")
+    finally:
+        # Restore original selection and mode
         try:
-            bpy.ops.object.mode_set(mode=original_mode)
+            for scene_obj in context.scene.objects:
+                scene_obj.select_set(False)
+            if original_active_obj:
+                original_active_obj.select_set(True)
+                context.view_layer.objects.active = original_active_obj
+                if original_mode != 'OBJECT':
+                    bpy.ops.object.mode_set(mode=original_mode)
         except RuntimeError:
             print("Couldn't restore previous mode (possibly invalid).")
 
-def create_mesh_from_selected_faces(self, mesh_name):
-    """
-    Create a new mesh object from selected faces
-    """
-    # Get the selected object based on mesh_name
-    if mesh_name == "origin":
-        selected_object = bpy.context.scene.origin_object
-    elif mesh_name == "insertion":
-        selected_object = bpy.context.scene.insertion_object
-    else:
-        self.report({'ERROR'}, f"Invalid object type '{mesh_name}'")
-        return {'CANCELLED'}
-    
-    objName = bpy.context.scene.muscle_Name
-
-    # Check if the object already exists in the collection
-    muscles_collection = bpy.data.collections.get("muscles")
-    if muscles_collection and objName in muscles_collection.children:
-        target_collection = muscles_collection.children[objName]
-        if mesh_name in target_collection.objects:
-            self.report({'WARNING'}, f"Object '{mesh_name}' already exists in collection '{objName}'")
-            return {'CANCELLED'}
-    else:
-        self.report({'ERROR'}, f"Collection '{objName}' not found in 'muscles'")
-        return {'CANCELLED'}
-    
-    # Ensure the selected object is in edit mode
-    if bpy.context.object != selected_object or bpy.context.object.mode != 'EDIT':
-        self.report({'ERROR'}, f"The active object is not in edit mode or is not the correct object for '{mesh_name}'")
-        return {'CANCELLED'}
-    # Get the BMesh representation
-    bm = bmesh.from_edit_mesh(selected_object.data)
-
-    # Find the selected faces
-    selected_faces = [face for face in bm.faces if face.select]
-
-    if not selected_faces:
-        bpy.ops.object.mode_set(mode='OBJECT')
-        self.report({'WARNING'}, "No faces selected")
-        return {'CANCELLED'}
-
-    # Create a new mesh and object
-    new_mesh = bpy.data.meshes.new(mesh_name)
-    new_object = bpy.data.objects.new(mesh_name, new_mesh)
-    bpy.context.collection.objects.link(new_object)
-
-    # Create a new BMesh for the new object
-    new_bm = bmesh.new()
-
-    # Copy selected faces to the new BMesh
-    for face in selected_faces:
-        new_face = new_bm.faces.new([new_bm.verts.new(v.co) for v in face.verts])
-        new_face.normal_update()
-
-    # Finish up the new BMesh
-    new_bm.to_mesh(new_mesh)
-    new_bm.free()
-
-    # Add the new object to the collection with objName inside "muscles"
-    target_collection.objects.link(new_object)
-    bpy.context.collection.objects.unlink(new_object)
-
-    # Set the new object as active
-    bpy.context.view_layer.objects.active = new_object
-    new_object.select_set(True)
-
-    # Switch to edit mode to remove doubles
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.mesh.remove_doubles(threshold=0.0001)
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.mesh.region_to_loop()
-    # Separate the selected edges
-    bpy.ops.mesh.separate(type='SELECTED')
-
-    # Switch back to object mode
-    bpy.ops.object.mode_set(mode='OBJECT')
-    # Rename the object 
-    # Get the last object created
-    contour_object = bpy.context.selected_objects[-1]
-    mesh_name = objName + "_" + mesh_name
-    new_object.name = mesh_name
-    contour_object.name = mesh_name + "_contour"
-
-    # Deselect everything and select the contour object
-    bpy.ops.object.select_all(action='DESELECT')
-    contour_object.select_set(True)
-    bpy.context.view_layer.objects.active = contour_object
-    # Convert the contour object to a curve
-    bpy.ops.object.convert(target='CURVE')
-
-    # Check the number of splines in the curve
-    if len(contour_object.data.splines) > 1:
-        # Get the curve with the most points
-        max_points = 0
-        max_spline = None
-        for spline in contour_object.data.splines:
-            if len(spline.points) > max_points:
-                max_points = len(spline.points)
-                max_spline = spline
-        # Remove the other splines
-        for spline in contour_object.data.splines:
-            if spline != max_spline:
-                contour_object.data.splines.remove(spline)
-                print("Spline removed")
-            else:
-                print("Spline not removed")
-
-    self.report({'INFO'}, f"New mesh '{mesh_name}' with selected faces created and added to collection '{objName}' inside 'muscles'")
-    return {'FINISHED'}
-
-def update_muscle_subdivision(self, context):
-    muscle_name = context.scene.muscle_Name
-    muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection or (muscle_name not in muscles_collection.children):
-        print(f"Muscle collection '{muscle_name}' not found.")
-        return
-    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
-    if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found.")
-        return
-
-    subdivision = context.scene.muscle_subdivisions
-
-    def subdiv_action():
-        if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Socket_3"] = subdivision
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.object.mode_set(mode='OBJECT')
-        else:
-            print("Geometry Nodes modifier not found on muscle object")
-
-    with_temp_object_active(context, muscle_obj, subdiv_action)
-
-def update_muscle_resampling(self, context):
-    muscle_name = context.scene.muscle_Name
-    muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection or (muscle_name not in muscles_collection.children):
-        print(f"Muscle collection '{muscle_name}' not found.")
-        return
-    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
-    if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found.")
-        return
-
-    resampling = context.scene.muscle_resampling
-
-    def resample_action():
-        if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Socket_2"] = resampling
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.object.mode_set(mode='OBJECT')
-        else:
-            print("Geometry Nodes modifier not found on muscle object")
-
-    with_temp_object_active(context, muscle_obj, resample_action)
-
-def update_origin_rotation(self, context):
-    muscle_name = context.scene.muscle_Name
-    muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection or (muscle_name not in muscles_collection.children):
-        print(f"Muscle collection '{muscle_name}' not found.")
-        return
-    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
-    if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found.")
-        return
-
-    origin_rotation = context.scene.origin_rotation
-
-    def origin_rot_action():
-        if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Socket_8"] = origin_rotation
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.object.mode_set(mode='OBJECT')
-        else:
-            print("Geometry Nodes modifier not found on muscle object")
-
-    with_temp_object_active(context, muscle_obj, origin_rot_action)
-
-def update_insertion_rotation(self, context):
-    muscle_name = context.scene.muscle_Name
-    muscles_collection = bpy.data.collections.get("muscles")
-    if not muscles_collection or (muscle_name not in muscles_collection.children):
-        print(f"Muscle collection '{muscle_name}' not found.")
-        return
-    muscle_obj = muscles_collection.children[muscle_name].objects.get(muscle_name + "_muscle")
-    if not muscle_obj:
-        print(f"Muscle object '{muscle_name}_muscle' not found.")
-        return
-
-    insertion_rotation = context.scene.insertion_rotation
-
-    def insertion_rot_action():
-        if "Geometry Nodes" in muscle_obj.modifiers:
-            muscle_obj.modifiers["Geometry Nodes"]["Socket_9"] = insertion_rotation
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.object.mode_set(mode='OBJECT')
-        else:
-            print("Geometry Nodes modifier not found on muscle object")
-
-    with_temp_object_active(context, muscle_obj, insertion_rot_action)
 
 def update_mesh_density(self, context):
     """Update mesh density in real-time if preview is active"""
@@ -348,3 +198,168 @@ def calculate_muscle_volume(muscle_obj):
     bm.free()
     
     return abs(volume)  # Use absolute value in case of inverted normals
+
+
+def get_contour_direction_vector(contour_obj, reference_point):
+    """
+    Calculate the direction vector of a contour relative to a reference point
+    Returns a vector indicating the general direction of vertex flow
+    """
+    if not contour_obj or contour_obj.type != 'CURVE':
+        return Vector((0, 0, 0))
+    
+    if not contour_obj.data.splines:
+        return Vector((0, 0, 0))
+    
+    spline = contour_obj.data.splines[0]
+    
+    # Get contour points in world coordinates
+    if spline.type in ['NURBS', 'POLY']:
+        points = [contour_obj.matrix_world @ Vector(point.co[:3]) for point in spline.points]
+    elif spline.type == 'BEZIER':
+        points = [contour_obj.matrix_world @ point.co for point in spline.bezier_points]
+    else:
+        return Vector((0, 0, 0))
+    
+    if len(points) < 3:
+        return Vector((0, 0, 0))
+    
+    # Calculate the centroid of the contour
+    contour_centroid = sum(points, Vector()) / len(points)
+    
+    # Calculate direction vector from contour centroid to reference point
+    direction_to_ref = (reference_point - contour_centroid).normalized()
+    
+    # Calculate the "flow" direction of vertices by sampling a few segments
+    flow_vector = Vector((0, 0, 0))
+    sample_count = min(8, len(points) // 2)  # Sample several segments
+    
+    for i in range(sample_count):
+        idx1 = i * len(points) // sample_count
+        idx2 = (idx1 + 1) % len(points)
+        
+        # Vector from current point to next point
+        segment_vector = points[idx2] - points[idx1]
+        
+        # Vector from contour center to current point
+        radial_vector = points[idx1] - contour_centroid
+        
+        # Cross product gives us the "circulation" direction
+        circulation = radial_vector.cross(segment_vector)
+        flow_vector += circulation
+    
+    flow_vector = flow_vector.normalized()
+    
+    # Project flow onto the direction toward reference point
+    flow_alignment = flow_vector.dot(direction_to_ref)
+    
+    return flow_vector, flow_alignment
+
+
+def align_contour_directions(origin_contour, insertion_contour):
+    """
+    Align the direction of contours so they both circulate in compatible directions
+    for proper lofting without twisted geometry
+    """
+    if not (origin_contour and insertion_contour):
+        return False
+    
+    if not (origin_contour.type == 'CURVE' and insertion_contour.type == 'CURVE'):
+        return False
+    
+    # Calculate centroids
+    origin_centroid = calculate_curve_centroid(origin_contour)
+    insertion_centroid = calculate_curve_centroid(insertion_contour)
+    
+    # Get direction information for both contours
+    origin_flow, origin_alignment = get_contour_direction_vector(origin_contour, insertion_centroid)
+    insertion_flow, insertion_alignment = get_contour_direction_vector(insertion_contour, origin_centroid)
+    
+    # If the alignments have opposite signs, the contours are circulating in opposite directions
+    if origin_alignment * insertion_alignment < 0:
+        print(f"Contour directions are misaligned (origin: {origin_alignment:.3f}, insertion: {insertion_alignment:.3f})")
+        print("Reversing insertion contour direction...")
+        
+        # Reverse the insertion contour
+        return reverse_contour_direction(insertion_contour)
+    else:
+        print(f"Contour directions are aligned (origin: {origin_alignment:.3f}, insertion: {insertion_alignment:.3f})")
+        return True
+
+
+def calculate_curve_centroid(curve_obj):
+    """Calculate the centroid of a curve object"""
+    if not curve_obj or curve_obj.type != 'CURVE':
+        return Vector((0, 0, 0))
+    
+    if not curve_obj.data.splines:
+        return Vector((0, 0, 0))
+    
+    spline = curve_obj.data.splines[0]
+    points = []
+    
+    if spline.type in ['NURBS', 'POLY']:
+        points = [curve_obj.matrix_world @ Vector(point.co[:3]) for point in spline.points]
+    elif spline.type == 'BEZIER':
+        points = [curve_obj.matrix_world @ point.co for point in spline.bezier_points]
+    
+    if not points:
+        return Vector((0, 0, 0))
+    
+    return sum(points, Vector()) / len(points)
+
+
+def reverse_contour_direction(contour_obj):
+    """
+    Reverse the direction of vertices in a contour curve
+    """
+    if not contour_obj or contour_obj.type != 'CURVE':
+        return False
+    
+    if not contour_obj.data.splines:
+        return False
+    
+    spline = contour_obj.data.splines[0]
+    
+    try:
+        if spline.type in ['NURBS', 'POLY']:
+            # Get all point coordinates
+            coords = [Vector(point.co) for point in spline.points]
+            # Reverse the order
+            coords.reverse()
+            # Apply back to spline
+            for i, coord in enumerate(coords):
+                spline.points[i].co = coord
+                
+        elif spline.type == 'BEZIER':
+            # Get all bezier point data
+            bezier_data = []
+            for point in spline.bezier_points:
+                bezier_data.append({
+                    'co': Vector(point.co),
+                    'handle_left': Vector(point.handle_left),
+                    'handle_right': Vector(point.handle_right),
+                    'handle_left_type': point.handle_left_type,
+                    'handle_right_type': point.handle_right_type
+                })
+            
+            # Reverse the order and swap handles
+            bezier_data.reverse()
+            
+            # Apply back to spline with swapped handles
+            for i, data in enumerate(bezier_data):
+                point = spline.bezier_points[i]
+                point.co = data['co']
+                # Swap left and right handles when reversing
+                point.handle_left = data['handle_right']
+                point.handle_right = data['handle_left']
+                point.handle_left_type = data['handle_right_type']
+                point.handle_right_type = data['handle_left_type']
+        
+        # Update the curve
+        contour_obj.data.update()
+        return True
+        
+    except Exception as e:
+        print(f"Error reversing contour direction: {e}")
+        return False

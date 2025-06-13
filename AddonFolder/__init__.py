@@ -17,9 +17,7 @@ from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
                             Select_Insertion_Op, Submit_Origin_Op,    
                             Submit_Insertion_Op, Next_Muscle_Op,
                             Calculate_Muscle_Parameters_Op)
-from .muscle_utilities import (update_muscle_subdivision, update_muscle_resampling,
-                             update_insertion_rotation, update_origin_rotation,
-                             update_mesh_density)
+from .muscle_utilities import (update_mesh_density)
 from .improved_muscle_workflow import (Muscle_Curve_Creation_Op, 
                                      Muscle_Mesh_Generation_Op,
                                      Muscle_Preview_Update_Op,
@@ -75,51 +73,6 @@ def register():
         description="Insert your muscle name",
         default='Insert muscle name'
     )
-    bpy.types.Scene.origin_Name = bpy.props.StringProperty(
-        name="Origin Name",
-        description="Insert origin name",
-        default='Insert origin name'
-    )
-    bpy.types.Scene.insertion_Name = bpy.props.StringProperty(
-        name="Insertion Name",
-        description="Insert insertion name",
-        default='Insert insertion name'
-    )
-    bpy.types.Scene.muscle_subdivisions = bpy.props.IntProperty(
-        name="muscle_subdivisions",
-        description="Number of subdivisions",
-        default=10,
-        min=2,
-        max=100,
-        update=update_muscle_subdivision
-    )
-
-    bpy.types.Scene.muscle_resampling = bpy.props.IntProperty(
-        name="muscle_resampling",
-        description="Number resamplings for the attachment areas",
-        default= 32,
-        min=3,
-        max=300,
-        update= update_muscle_resampling
-    )
-
-    bpy.types.Scene.origin_rotation = bpy.props.IntProperty(
-        name="origin_rotation",
-        description="Rotate the order of the vertex from the origin object",
-        default= 0,
-        min= 0,
-        max= 1000,
-        update= update_origin_rotation
-    )
-
-    bpy.types.Scene.insertion_rotation = bpy.props.IntProperty(
-        name="insertion_rotation",
-        description="Rotate the order of the vertex from the insertion object",
-        default= 0,
-        min= 0,
-        max= 1000,
-        update= update_insertion_rotation
-    )
 
     # New mesh density control properties
     bpy.types.Scene.muscle_curve_subdivisions = bpy.props.IntProperty(
@@ -172,14 +125,8 @@ def unregister():
     del bpy.types.Scene.muscle_Name
     del bpy.types.Scene.conf_path
     del bpy.types.Scene.file_name
-    del bpy.types.Scene.muscle_subdivisions
     del bpy.types.Scene.origin_object
     del bpy.types.Scene.insertion_object
-    del bpy.types.Scene.muscle_resampling
-    del bpy.types.Scene.origin_Name
-    del bpy.types.Scene.insertion_Name
-    del bpy.types.Scene.origin_rotation
-    del bpy.types.Scene.insertion_rotation
     del bpy.types.Scene.muscle_curve_subdivisions
     del bpy.types.Scene.muscle_contour_resolution
     del bpy.types.Scene.muscle_constant

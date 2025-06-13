@@ -12,11 +12,9 @@ Díaz de León-Muñoz, E. M. (2025). MyoGeneratorRemix: A Blender Add-On for Cre
 ```
 
 
-## Note about Alfa Release 0.1
+## Note about Release 0.2
 
-The curve is not being configured correctly in the Geometry Nodes, for this reason, the user must configure the curve manually by selecting the *muscle object* and going to *Modifiers* in the *Properties Panel* and selecting the *Curve* option in the *Geometry Nodes* modifier. The Curve is already there, the user only needs to select it and press *Enter*.
-
-![Curve Fix](https://github.com/MiguelDLM/MyoGeneratorRemix/blob/main/curve-fix.png)
+This version uses a completely redesigned workflow that creates muscle meshes directly without requiring Geometry Nodes configuration. The curve creation and mesh generation process is now streamlined and automated.
 ## 
 
 ## Output of Add-On

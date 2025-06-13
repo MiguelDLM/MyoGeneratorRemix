@@ -1,8 +1,5 @@
 """
-Improved Muscle Workflow Module
-Implements a two-stage workflow for muscle creation:
-1. Curve creation and manipulation
-2. Final mesh generation with lofting
+Workflow for creating and manipulating muscle meshes
 """
 
 import bpy
@@ -23,10 +20,10 @@ except ImportError:
     def smooth_curve_transitions(curve_obj, smoothing_factor=0.5):
         """Fallback smoothing function"""
         return True
+
 from .lofting_utilities import (create_smooth_curve_between_points, 
-                               improve_curve_smoothness,
-                               validate_lofting_inputs,
                                auto_adjust_curve_handles)
+from .muscle_utilities import align_contour_directions
 
 class Muscle_Curve_Creation_Op(bpy.types.Operator):
     """Create and setup the muscle curve for manipulation"""
@@ -77,6 +74,19 @@ class Muscle_Curve_Creation_Op(bpy.types.Operator):
         
         # Move curve to target collection
         self.remap_objects(curve_obj, target_collection)
+        
+        # Now align the contour directions for proper lofting
+        origin_contour = target_collection.objects.get(f"{muscle_name}_origin_contour")
+        insertion_contour = target_collection.objects.get(f"{muscle_name}_insertion_contour")
+        
+        if origin_contour and insertion_contour:
+            align_success = align_contour_directions(origin_contour, insertion_contour)
+            if align_success:
+                self.report({'INFO'}, "Contour directions aligned for proper lofting")
+            else:
+                self.report({'WARNING'}, "Could not align contour directions - check contour curves")
+        else:
+            self.report({'WARNING'}, "Origin or insertion contour not found - alignment skipped")
         
         # Set curve as active for user manipulation
         try:
@@ -536,9 +546,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 # Create preview object
                 self._preview_object = bpy.data.objects.new(muscle_name + "_preview", preview_mesh)
                 target_collection.objects.link(self._preview_object)
-                
-                # Set material to make it look like a preview
-                self.apply_preview_material(self._preview_object)
+
                 
                 # Update viewport
                 context.view_layer.update()
@@ -745,35 +753,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 vertices.append(world_co)
         
         return vertices
-    
-    def apply_preview_material(self, obj):
-        """Apply a preview material to make it distinguishable"""
-        mat_name = "MusclePreviewMaterial"
         
-        # Create or get preview material
-        if mat_name not in bpy.data.materials:
-            mat = bpy.data.materials.new(name=mat_name)
-            mat.use_nodes = True
-            
-            # Simple orange material
-            bsdf = mat.node_tree.nodes["Principled BSDF"]
-            bsdf.inputs[0].default_value = (1.0, 0.4, 0.0, 1.0)  # Orange
-            bsdf.inputs[18].default_value = 0.3  # Alpha for transparency
-            
-            mat.blend_method = 'BLEND'
-            mat.show_transparent_back = True
-        else:
-            mat = bpy.data.materials[mat_name]
-        
-        # Apply material
-        if obj.data.materials:
-            obj.data.materials[0] = mat
-        else:
-            obj.data.materials.append(mat)
-        
-        # Set display properties
-        obj.show_transparent = True
-    
     def create_cap_faces(self, bm, vertex_loop, reverse=False):
         """Create cap faces for muscle ends using fan triangulation"""
         if len(vertex_loop) < 3:

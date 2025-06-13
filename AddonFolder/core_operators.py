@@ -69,7 +69,7 @@ class Select_Insertion_Op(bpy.types.Operator):
 
 
 def create_mesh_from_selected_faces(operator, mesh_name):
-    """Create a mesh from selected faces"""
+    """Create a mesh from selected faces and generate contour curve"""
     # Get active object
     obj = bpy.context.active_object
     if not obj or obj.type != 'MESH':
@@ -90,24 +90,142 @@ def create_mesh_from_selected_faces(operator, mesh_name):
     
     target_collection = muscles_collection.children[muscle_name]
     
-    # Duplicate selected faces
-    bpy.ops.mesh.duplicate()
+    # Check if objects already exist
+    existing_mesh = target_collection.objects.get(f"{muscle_name}_{mesh_name}")
+    existing_contour = target_collection.objects.get(f"{muscle_name}_{mesh_name}_contour")
+    
+    if existing_mesh or existing_contour:
+        operator.report({'WARNING'}, f"Object '{mesh_name}' already exists in collection '{muscle_name}'")
+        return
+    
+    # Get the BMesh representation
+    bm = bmesh.from_edit_mesh(obj.data)
+    
+    # Find the selected faces
+    selected_faces = [face for face in bm.faces if face.select]
+    
+    if not selected_faces:
+        operator.report({'WARNING'}, "No faces selected")
+        return
+    
+    # Create a new mesh and object for the surface
+    new_mesh = bpy.data.meshes.new(f"{muscle_name}_{mesh_name}")
+    new_object = bpy.data.objects.new(f"{muscle_name}_{mesh_name}", new_mesh)
+    
+    # Create a new BMesh for the new object
+    new_bm = bmesh.new()
+    
+    # Copy selected faces to the new BMesh with world coordinates
+    for face in selected_faces:
+        # Transform vertices to world coordinates
+        world_verts = []
+        for vert in face.verts:
+            world_co = obj.matrix_world @ vert.co
+            world_verts.append(new_bm.verts.new(world_co))
+        
+        new_face = new_bm.faces.new(world_verts)
+        new_face.normal_update()
+    
+    # Finish up the new BMesh
+    new_bm.to_mesh(new_mesh)
+    new_bm.free()
+    
+    # Add the new object to the target collection
+    target_collection.objects.link(new_object)
+    
+    # Switch back to object mode
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # Set the new object as active and selected
+    bpy.ops.object.select_all(action='DESELECT')
+    new_object.select_set(True)
+    bpy.context.view_layer.objects.active = new_object
+    
+    # Now duplicate this object to create the contour
+    bpy.ops.object.duplicate()
+    
+    # Get the duplicated object (should be the active object now)
+    contour_object = bpy.context.active_object
+    contour_object.name = f"{muscle_name}_{mesh_name}_contour"
+    
+    # Move contour to target collection
+    for collection in contour_object.users_collection:
+        collection.objects.unlink(contour_object)
+    target_collection.objects.link(contour_object)
+    
+    # Switch to edit mode to extract boundary loop
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.remove_doubles(threshold=0.0001)
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.region_to_loop()
+    
+    # Separate the selected edges (boundary loop)
     bpy.ops.mesh.separate(type='SELECTED')
     
-    # Get the new object (should be the last selected)
-    new_obj = None
+    # Switch back to object mode
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # After separate, we have two objects:
+    # 1. contour_object (the original faces, now without boundary)  
+    # 2. boundary_object (just the boundary loop)
+    # We want to keep only the boundary_object and remove the faces
+    
+    # Find the boundary object (the newly created one with boundary loop)
+    boundary_object = None
     for selected_obj in bpy.context.selected_objects:
-        if selected_obj != obj:
-            new_obj = selected_obj
+        if selected_obj != contour_object:
+            boundary_object = selected_obj
             break
     
-    if new_obj:
-        new_obj.name = f"{muscle_name}_{mesh_name}"
+    if boundary_object:
+        # Remove the original contour object (the solid faces - we don't need them)
+        bpy.data.objects.remove(contour_object, do_unlink=True)
+        
+        # The boundary object becomes our contour
+        contour_object = boundary_object
+        contour_object.name = f"{muscle_name}_{mesh_name}_contour"
         
         # Move to target collection
-        for collection in new_obj.users_collection:
-            collection.objects.unlink(new_obj)
-        target_collection.objects.link(new_obj)
+        for collection in contour_object.users_collection:
+            collection.objects.unlink(contour_object)
+        target_collection.objects.link(contour_object)
+        
+        # Select only the contour object and convert to curve
+        bpy.ops.object.select_all(action='DESELECT')
+        contour_object.select_set(True)
+        bpy.context.view_layer.objects.active = contour_object
+        
+        # Convert to curve
+        bpy.ops.object.convert(target='CURVE')
+        
+        # Now that it's a curve, clean up splines - keep only the largest spline if multiple exist
+        if hasattr(contour_object.data, 'splines') and len(contour_object.data.splines) > 1:
+            max_points = 0
+            max_spline = None
+            for spline in contour_object.data.splines:
+                points_count = len(spline.points) if spline.type in ['NURBS', 'POLY'] else len(spline.bezier_points)
+                if points_count > max_points:
+                    max_points = points_count
+                    max_spline = spline
+            
+            # Remove other splines
+            splines_to_remove = [spline for spline in contour_object.data.splines if spline != max_spline]
+            for spline in splines_to_remove:
+                contour_object.data.splines.remove(spline)
+        
+        # Make sure the curve is cyclic (closed)
+        if hasattr(contour_object.data, 'splines') and len(contour_object.data.splines) > 0:
+            contour_object.data.splines[0].use_cyclic_u = True
+    else:
+        # If no boundary object found, something went wrong
+        operator.report({'WARNING'}, "Could not extract boundary loop properly")
+    
+    operator.report({'INFO'}, f"Created mesh '{muscle_name}_{mesh_name}' and contour curve")
+    
+    # Return to object mode and deselect all
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
 
 
 class Submit_Origin_Op(bpy.types.Operator):
