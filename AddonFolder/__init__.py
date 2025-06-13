@@ -48,8 +48,9 @@ def register():
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
         name="Path",
         default="",
-        description="Select where to save your file...",
-        subtype="DIR_PATH"
+        description="Select folder where to save your CSV file...",
+        subtype="DIR_PATH",
+        maxlen=1024
     )
     bpy.types.Scene.file_name = bpy.props.StringProperty(
         name="File_Name",
@@ -139,6 +140,17 @@ def register():
         update=update_mesh_density
     )
 
+    # Muscle force calculation constant
+    bpy.types.Scene.muscle_constant = bpy.props.FloatProperty(
+        name="Muscle Constant",
+        description="Muscle constant for force calculation (N/cm²)",
+        default=0.3,
+        min=0.0,
+        max=10.0,
+        precision=3,
+        step=0.01
+    )
+
 
 def unregister():
     bpy.utils.unregister_class(Muscle_Name_Submition)
@@ -170,3 +182,4 @@ def unregister():
     del bpy.types.Scene.insertion_rotation
     del bpy.types.Scene.muscle_curve_subdivisions
     del bpy.types.Scene.muscle_contour_resolution
+    del bpy.types.Scene.muscle_constant

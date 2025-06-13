@@ -8,7 +8,9 @@ import bmesh
 import csv
 import os
 from mathutils import Vector
-from .muscle_utilities import select_and_edit_object, with_temp_object_active
+from .muscle_utilities import (select_and_edit_object, with_temp_object_active,
+                             calculate_mesh_area, calculate_mesh_centroid,
+                             calculate_curve_length, calculate_muscle_volume)
 
 
 class Muscle_Name_Submition(bpy.types.Operator):
@@ -169,6 +171,18 @@ class Calculate_Muscle_Parameters_Op(bpy.types.Operator):
             self.report({'ERROR'}, "Please specify folder path and file name")
             return {'CANCELLED'}
         
+        # Handle Blender's relative path notation
+        if folder_path.startswith("//"):
+            # Convert Blender relative path to absolute path
+            folder_path = bpy.path.abspath(folder_path)
+        
+        # Ensure the directory exists, create if it doesn't
+        try:
+            os.makedirs(folder_path, exist_ok=True)
+        except OSError as e:
+            self.report({'ERROR'}, f"Cannot create directory '{folder_path}': {str(e)}")
+            return {'CANCELLED'}
+        
         csv_path = os.path.join(folder_path, file_name + ".csv")
         
         # Get muscles collection
@@ -179,33 +193,84 @@ class Calculate_Muscle_Parameters_Op(bpy.types.Operator):
         
         # Calculate parameters for each muscle
         muscle_data = []
+        muscle_constant = context.scene.muscle_constant  # Get user-defined muscle constant
+        
         for muscle_collection in muscles_collection.children:
             muscle_name = muscle_collection.name
+            
+            # Get muscle objects
             muscle_obj = muscle_collection.objects.get(f"{muscle_name}_muscle")
+            origin_obj = muscle_collection.objects.get(f"{muscle_name}_origin") 
+            insertion_obj = muscle_collection.objects.get(f"{muscle_name}_insertion")
+            curve_obj = muscle_collection.objects.get(f"{muscle_name}_curve")
             
             if muscle_obj and muscle_obj.type == 'MESH':
-                # Calculate volume
-                bm = bmesh.new()
-                bm.from_mesh(muscle_obj.data)
-                bm.transform(muscle_obj.matrix_world)
-                volume = bm.calc_volume()
-                bm.free()
+                # Calculate muscle volume
+                volume = calculate_muscle_volume(muscle_obj)
+                
+                # Calculate fiber length (curve length)
+                fiber_length = 0.0
+                if curve_obj:
+                    fiber_length = calculate_curve_length(curve_obj)
+                
+                # Calculate origin area and centroid
+                origin_area = 0.0
+                origin_centroid = Vector((0, 0, 0))
+                if origin_obj:
+                    origin_area = calculate_mesh_area(origin_obj)
+                    origin_centroid = calculate_mesh_centroid(origin_obj)
+                
+                # Calculate insertion area and centroid
+                insertion_area = 0.0
+                insertion_centroid = Vector((0, 0, 0))
+                if insertion_obj:
+                    insertion_area = calculate_mesh_area(insertion_obj)
+                    insertion_centroid = calculate_mesh_centroid(insertion_obj)
+                
+                # Calculate PCSA (Physiological Cross-Sectional Area)
+                pcsa = 0.0
+                if fiber_length > 0:
+                    pcsa = volume / fiber_length
+                
+                # Calculate muscle force
+                force = pcsa * muscle_constant
+                
+                # Calculate linear length (distance between centroids)
+                linear_length = (insertion_centroid - origin_centroid).length
                 
                 muscle_data.append({
                     'name': muscle_name,
-                    'volume': volume
+                    'volume': volume,
+                    'fiber_length': fiber_length,
+                    'origin_area': origin_area,
+                    'insertion_area': insertion_area,
+                    'origin_centroid': f"({origin_centroid.x:.4f}, {origin_centroid.y:.4f}, {origin_centroid.z:.4f})",
+                    'insertion_centroid': f"({insertion_centroid.x:.4f}, {insertion_centroid.y:.4f}, {insertion_centroid.z:.4f})",
+                    'linear_length': linear_length,
+                    'pcsa': pcsa,
+                    'force': force
                 })
         
-        # Write to CSV
+        # Write to CSV (create new file or overwrite existing)
         try:
-            with open(csv_path, 'w', newline='') as csvfile:
-                fieldnames = ['name', 'volume']
+            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = [
+                    'name', 'volume', 'fiber_length', 'origin_area', 'insertion_area',
+                    'origin_centroid', 'insertion_centroid', 'linear_length', 
+                    'pcsa', 'force'
+                ]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 for row in muscle_data:
                     writer.writerow(row)
             
             self.report({'INFO'}, f"Muscle parameters saved to {csv_path}")
+        except PermissionError:
+            self.report({'ERROR'}, f"Permission denied. Cannot write to '{csv_path}'. Check file permissions.")
+            return {'CANCELLED'}
+        except FileNotFoundError:
+            self.report({'ERROR'}, f"Directory not found: '{folder_path}'. Please select a valid directory.")
+            return {'CANCELLED'}
         except Exception as e:
             self.report({'ERROR'}, f"Failed to save CSV: {str(e)}")
             return {'CANCELLED'}

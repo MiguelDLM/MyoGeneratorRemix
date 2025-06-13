@@ -231,6 +231,9 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         # Make sure it's visible (not transparent)
         preview_obj.show_transparent = False
         
+        # Ensure the final mesh has closed ends
+        self.ensure_mesh_closed(preview_obj)
+        
         # Select the new muscle object safely
         try:
             # Ensure we have a valid 3D view context
@@ -251,6 +254,92 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         
         self.report({'INFO'}, f"Muscle mesh '{final_name}' generated successfully!")
         return {'FINISHED'}
+    
+    def ensure_mesh_closed(self, mesh_obj):
+        """Ensure the muscle mesh has closed ends by filling any open boundaries"""
+        if not mesh_obj or mesh_obj.type != 'MESH':
+            return
+        
+        # Create bmesh instance from mesh
+        bm = bmesh.new()
+        bm.from_mesh(mesh_obj.data)
+        
+        # Ensure we have face indices
+        bm.faces.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.verts.ensure_lookup_table()
+        
+        # Fill holes in the mesh
+        open_edges = [edge for edge in bm.edges if len(edge.link_faces) == 1]
+        
+        if open_edges:
+            # Group boundary edges into loops
+            boundary_loops = []
+            remaining_edges = open_edges.copy()
+            
+            while remaining_edges:
+                loop = [remaining_edges.pop(0)]
+                current_vert = loop[0].verts[1]
+                
+                # Follow the boundary loop
+                while True:
+                    found_next = False
+                    for edge in remaining_edges:
+                        if current_vert in edge.verts:
+                            loop.append(edge)
+                            remaining_edges.remove(edge)
+                            current_vert = edge.verts[0] if edge.verts[1] == current_vert else edge.verts[1]
+                            found_next = True
+                            break
+                    
+                    if not found_next or current_vert == loop[0].verts[0]:
+                        break
+                
+                if len(loop) > 2:
+                    boundary_loops.append(loop)
+            
+            # Fill each boundary loop
+            for loop in boundary_loops:
+                loop_verts = []
+                for edge in loop:
+                    if not loop_verts or edge.verts[0] != loop_verts[-1]:
+                        loop_verts.append(edge.verts[0])
+                    if edge.verts[1] != loop_verts[0]:
+                        loop_verts.append(edge.verts[1])
+                
+                # Use fan triangulation to fill the hole
+                if len(loop_verts) >= 3:
+                    self.create_cap_faces_simple(bm, loop_verts)
+        
+        # Update the mesh
+        bm.to_mesh(mesh_obj.data)
+        mesh_obj.data.update()
+        bm.free()
+    
+    def create_cap_faces_simple(self, bm, vertex_loop):
+        """Create cap faces using fan triangulation (simplified version)"""
+        if len(vertex_loop) < 3:
+            return
+        
+        # Calculate center point of the loop
+        center_point = Vector((0, 0, 0))
+        for vert in vertex_loop:
+            center_point += vert.co
+        center_point /= len(vertex_loop)
+        
+        # Create center vertex
+        center_vert = bm.verts.new(center_point)
+        
+        # Create triangular faces from center to each edge
+        for i in range(len(vertex_loop)):
+            v1 = vertex_loop[i]
+            v2 = vertex_loop[(i + 1) % len(vertex_loop)]
+            
+            try:
+                bm.faces.new([center_vert, v1, v2])
+            except ValueError:
+                # Skip if face creation fails
+                continue
 
 
 class Muscle_Preview_Update_Op(bpy.types.Operator):
@@ -552,17 +641,15 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                             except ValueError:
                                 continue
             
-            # Add end caps
-            if len(vertex_loops) > 0 and len(vertex_loops[0]) > 2:
-                try:
-                    bm.faces.new(vertex_loops[0])
-                except ValueError:
-                    pass
+            # Add end caps with improved geometry
+            if len(vertex_loops) > 0:
+                # Create origin cap (first loop)
+                if len(vertex_loops[0]) > 2:
+                    self.create_cap_faces(bm, vertex_loops[0], reverse=False)
                 
-                try:
-                    bm.faces.new(reversed(vertex_loops[-1]))
-                except ValueError:
-                    pass
+                # Create insertion cap (last loop)
+                if len(vertex_loops[-1]) > 2:
+                    self.create_cap_faces(bm, vertex_loops[-1], reverse=True)
             
             # Clean up
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
@@ -686,6 +773,46 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         
         # Set display properties
         obj.show_transparent = True
+    
+    def create_cap_faces(self, bm, vertex_loop, reverse=False):
+        """Create cap faces for muscle ends using fan triangulation"""
+        if len(vertex_loop) < 3:
+            return
+        
+        try:
+            # For simple cases, try to create a single face
+            if len(vertex_loop) <= 4:
+                if reverse:
+                    bm.faces.new(reversed(vertex_loop))
+                else:
+                    bm.faces.new(vertex_loop)
+                return
+        except ValueError:
+            pass  # If single face fails, continue with fan triangulation
+        
+        # For complex cases, use fan triangulation
+        # Calculate center point of the loop
+        center_point = Vector((0, 0, 0))
+        for vert in vertex_loop:
+            center_point += vert.co
+        center_point /= len(vertex_loop)
+        
+        # Create center vertex
+        center_vert = bm.verts.new(center_point)
+        
+        # Create triangular faces from center to each edge
+        for i in range(len(vertex_loop)):
+            v1 = vertex_loop[i]
+            v2 = vertex_loop[(i + 1) % len(vertex_loop)]
+            
+            try:
+                if reverse:
+                    bm.faces.new([center_vert, v2, v1])
+                else:
+                    bm.faces.new([center_vert, v1, v2])
+            except ValueError:
+                # Skip if face creation fails
+                continue
 
 
 class Muscle_Preview_Stop_Op(bpy.types.Operator):

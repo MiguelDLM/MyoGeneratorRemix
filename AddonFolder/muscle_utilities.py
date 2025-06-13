@@ -264,3 +264,87 @@ def update_mesh_density(self, context):
         
         # Also force scene update
         context.view_layer.update()
+
+
+def calculate_mesh_area(mesh_obj):
+    """Calculate the surface area of a mesh object"""
+    if not mesh_obj or mesh_obj.type != 'MESH':
+        return 0.0
+    
+    # Create bmesh instance from mesh
+    bm = bmesh.new()
+    bm.from_mesh(mesh_obj.data)
+    
+    # Apply object's world transform
+    bm.transform(mesh_obj.matrix_world)
+    
+    # Calculate total area
+    total_area = 0.0
+    for face in bm.faces:
+        total_area += face.calc_area()
+    
+    bm.free()
+    return total_area
+
+
+def calculate_mesh_centroid(mesh_obj):
+    """Calculate the centroid (center of mass) of a mesh object"""
+    if not mesh_obj or mesh_obj.type != 'MESH':
+        return Vector((0, 0, 0))
+    
+    # Get vertices in world coordinates
+    vertices = []
+    for vertex in mesh_obj.data.vertices:
+        world_vertex = mesh_obj.matrix_world @ vertex.co
+        vertices.append(world_vertex)
+    
+    if not vertices:
+        return Vector((0, 0, 0))
+    
+    # Calculate centroid as average of all vertices
+    centroid = sum(vertices, Vector()) / len(vertices)
+    return centroid
+
+
+def calculate_curve_length(curve_obj):
+    """Calculate the total length of a curve object"""
+    if not curve_obj or curve_obj.type != 'CURVE':
+        return 0.0
+    
+    total_length = 0.0
+    
+    for spline in curve_obj.data.splines:
+        if spline.type in ['NURBS', 'POLY']:
+            # For NURBS and POLY splines, calculate distance between consecutive points
+            points = [curve_obj.matrix_world @ Vector(point.co[:3]) for point in spline.points]
+        elif spline.type == 'BEZIER':
+            # For Bezier splines, use bezier points
+            points = [curve_obj.matrix_world @ point.co for point in spline.bezier_points]
+        else:
+            continue
+        
+        # Calculate length by summing distances between consecutive points
+        for i in range(1, len(points)):
+            segment_length = (points[i] - points[i-1]).length
+            total_length += segment_length
+    
+    return total_length
+
+
+def calculate_muscle_volume(muscle_obj):
+    """Calculate the volume of a muscle mesh object"""
+    if not muscle_obj or muscle_obj.type != 'MESH':
+        return 0.0
+    
+    # Create bmesh instance from mesh
+    bm = bmesh.new()
+    bm.from_mesh(muscle_obj.data)
+    
+    # Apply object's world transform
+    bm.transform(muscle_obj.matrix_world)
+    
+    # Calculate volume
+    volume = bm.calc_volume()
+    bm.free()
+    
+    return abs(volume)  # Use absolute value in case of inverted normals

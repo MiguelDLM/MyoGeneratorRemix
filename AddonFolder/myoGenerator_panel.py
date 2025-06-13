@@ -106,5 +106,11 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         box.label(text="Finish")
         row = box.row()
         row.operator("view3d.next_muscle", text="Next Muscle")
+        
+        layout.separator()
+        
+        row = box.row()
+        row.prop(context.scene, "muscle_constant", text="Muscle Constant (N/cm²)", icon='FORCE_FORCE')
+        
         row = box.row()
         row.operator("view3d.calculate_muscle_parameters", text="Calculate Muscle Parameters")
