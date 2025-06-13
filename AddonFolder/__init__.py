@@ -21,7 +21,9 @@ from .muscle_utilities import (update_mesh_density)
 from .improved_muscle_workflow import (Muscle_Curve_Creation_Op, 
                                      Muscle_Mesh_Generation_Op,
                                      Muscle_Preview_Update_Op,
-                                     Muscle_Preview_Stop_Op)
+                                     Muscle_Preview_Stop_Op,
+                                     Muscle_Set_Curve_Weights_Op,
+                                     Muscle_Set_Default_Curve_Weights_Op)
 from .myoGenerator_panel import MYOGENERATOR_PT_panel
 
 
@@ -41,6 +43,8 @@ def register():
     bpy.utils.register_class(Muscle_Mesh_Generation_Op)
     bpy.utils.register_class(Muscle_Preview_Update_Op)
     bpy.utils.register_class(Muscle_Preview_Stop_Op)
+    bpy.utils.register_class(Muscle_Set_Curve_Weights_Op)
+    bpy.utils.register_class(Muscle_Set_Default_Curve_Weights_Op)
 
 
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
@@ -104,6 +108,25 @@ def register():
         step=0.01
     )
 
+    # Spline-based diameter control properties
+    bpy.types.Scene.muscle_use_spline_diameter = bpy.props.BoolProperty(
+        name="Use Spline Diameter Control",
+        description="Use curve point weights to control muscle diameter along the path",
+        default=True,
+        update=update_mesh_density
+    )
+
+    bpy.types.Scene.muscle_diameter_smoothing = bpy.props.FloatProperty(
+        name="Diameter Smoothing",
+        description="Smoothing factor for diameter transitions (0 = sharp, 1 = very smooth)",
+        default=0.5,
+        min=0.0,
+        max=1.0,
+        precision=3,
+        step=0.01,
+        update=update_mesh_density
+    )
+
 
 def unregister():
     bpy.utils.unregister_class(Muscle_Name_Submition)
@@ -120,6 +143,8 @@ def unregister():
     bpy.utils.unregister_class(Muscle_Mesh_Generation_Op)
     bpy.utils.unregister_class(Muscle_Preview_Update_Op)
     bpy.utils.unregister_class(Muscle_Preview_Stop_Op)
+    bpy.utils.unregister_class(Muscle_Set_Curve_Weights_Op)
+    bpy.utils.unregister_class(Muscle_Set_Default_Curve_Weights_Op)
 
 
     del bpy.types.Scene.muscle_Name
@@ -130,3 +155,5 @@ def unregister():
     del bpy.types.Scene.muscle_curve_subdivisions
     del bpy.types.Scene.muscle_contour_resolution
     del bpy.types.Scene.muscle_constant
+    del bpy.types.Scene.muscle_use_spline_diameter
+    del bpy.types.Scene.muscle_diameter_smoothing

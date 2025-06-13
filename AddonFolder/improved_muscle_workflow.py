@@ -144,29 +144,62 @@ class Muscle_Curve_Creation_Op(bpy.types.Operator):
         return centroid_world, avg_normal_world
     
     def create_bezier_curve(self, start_point, end_point, start_normal, end_normal, muscle_name):
-        """Create a NURBS path with multiple control points using improved curve generation"""
+        """Create a Bezier curve with proper control for orientation and scaling"""
         
-        # Use the enhanced curve creation from utilities
-        curve_points = create_smooth_curve_between_points(
-            start_point, end_point, start_normal, end_normal, num_points=7
-        )
+        # Calculate control points for smooth muscle curve
+        direction = end_point - start_point
+        distance = direction.length
         
         # Create a new curve data object
         curve_data = bpy.data.curves.new(name=muscle_name + "_curve", type='CURVE')
         curve_data.dimensions = '3D'
         curve_data.resolution_u = 12
         
-        # Create a new spline
-        spline = curve_data.splines.new(type='NURBS')
-        spline.points.add(len(curve_points) - 1)  # -1 because spline starts with 1 point
+        # Create a Bezier spline for better control
+        spline = curve_data.splines.new(type='BEZIER')
         
-        # Assign coordinates to each point
-        for i, point in enumerate(curve_points):
-            spline.points[i].co = (point.x, point.y, point.z, 1)
+        # Add more control points for better muscle shape control
+        num_points = 5  # Start, 3 intermediate, End
+        spline.bezier_points.add(num_points - 1)  # -1 because it starts with 1 point
         
-        # Set spline properties for smooth muscle curves
-        spline.order_u = min(4, len(curve_points))
-        spline.use_endpoint_u = True
+        # Set up points for natural muscle curve
+        for i in range(num_points):
+            t = i / (num_points - 1)
+            
+            # Interpolate position along the path
+            point_pos = start_point.lerp(end_point, t)
+            
+            # Add slight curve for natural muscle shape
+            if i == 1 or i == 3:  # Intermediate points
+                # Offset slightly based on normals for natural curve
+                offset_strength = distance * 0.1
+                if i == 1:
+                    offset = start_normal * offset_strength
+                else:
+                    offset = end_normal * offset_strength
+                point_pos += offset
+            
+            # Set point position
+            bezier_point = spline.bezier_points[i]
+            bezier_point.co = point_pos
+            
+            # Set radius for diameter control (1.0 = normal, >1.0 = thicker, <1.0 = thinner)
+            if i == 0 or i == num_points - 1:
+                # End points - tapered for attachment
+                bezier_point.radius = 0.8
+            elif i == num_points // 2:
+                # Middle point - thicker for muscle belly
+                bezier_point.radius = 1.4
+            else:
+                # Transition points - gradual increase toward middle
+                distance_from_center = abs(i - num_points // 2)
+                max_distance = num_points // 2
+                # Linear interpolation from center (1.4) to ends (0.8)
+                bezier_point.radius = 1.4 - (distance_from_center / max_distance) * 0.6
+            
+            # Set handle types for smooth curves
+            bezier_point.handle_left_type = 'AUTO'
+            bezier_point.handle_right_type = 'AUTO'
         
         # Create the curve object and link to scene
         curve_obj = bpy.data.objects.new(muscle_name + "_curve", curve_data)
@@ -175,9 +208,6 @@ class Muscle_Curve_Creation_Op(bpy.types.Operator):
         # Set as active object
         bpy.context.view_layer.objects.active = curve_obj
         curve_obj.select_set(True)
-        
-        # Apply automatic smoothing
-        auto_adjust_curve_handles(curve_obj)
         
         bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
         return curve_obj
@@ -243,6 +273,9 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         
         # Ensure the final mesh has closed ends
         self.ensure_mesh_closed(preview_obj)
+        
+        # Apply diameter-aware smoothing to the final mesh
+        self.smooth_muscle_mesh(preview_obj, context)
         
         # Select the new muscle object safely
         try:
@@ -350,6 +383,41 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
             except ValueError:
                 # Skip if face creation fails
                 continue
+    
+    def smooth_muscle_mesh(self, mesh_obj, context):
+        """Apply diameter-aware smoothing to the final muscle mesh"""
+        if not mesh_obj or mesh_obj.type != 'MESH':
+            return
+        
+        # Import smoothing utilities
+        try:
+            from .spline_lofting_utilities import smooth_diameter_transitions
+        except ImportError:
+            # Basic smoothing fallback
+            import bmesh
+            bm = bmesh.new()
+            bm.from_mesh(mesh_obj.data)
+            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.2, repeat=2)
+            bm.to_mesh(mesh_obj.data)
+            mesh_obj.data.update()
+            bm.free()
+            return
+        
+        # Advanced diameter-aware smoothing
+        import bmesh
+        bm = bmesh.new()
+        bm.from_mesh(mesh_obj.data)
+        
+        # Apply gentle smoothing to preserve diameter variations
+        smoothing_iterations = max(1, int(getattr(context.scene, 'muscle_diameter_smoothing', 0.5) * 4))
+        
+        for _ in range(smoothing_iterations):
+            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.1, repeat=1)
+        
+        # Update the mesh
+        bm.to_mesh(mesh_obj.data)
+        mesh_obj.data.update()
+        bm.free()
 
 
 class Muscle_Preview_Update_Op(bpy.types.Operator):
@@ -372,7 +440,9 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 self.finish_preview(context)
                 return {'FINISHED'}
             
-            # Update on timer events or when density properties change
+            # Update on timer events, curve edits, or when density properties change
+            should_update = False
+            
             if event.type == 'TIMER':
                 # Get muscle collection and objects
                 muscles_collection = bpy.data.collections.get("muscles")
@@ -396,8 +466,25 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                     
                     self._last_curve_hash = current_curve_hash
                     self._last_density_hash = density_hash
+                    should_update = True
+            
+            # Also check for curve editing events that should trigger immediate updates
+            elif event.type in {'G', 'S', 'R', 'TAB', 'LEFTMOUSE', 'RIGHTMOUSE'} and event.value == 'RELEASE':
+                # Check if we're editing a curve object
+                if (context.active_object and context.active_object.type == 'CURVE' and 
+                    context.active_object.name.endswith('_curve')):
+                    should_update = True
+            
+            if should_update:
+                muscles_collection = bpy.data.collections.get("muscles")
+                if muscles_collection and muscle_name in muscles_collection.children:
+                    target_collection = muscles_collection.children[muscle_name]
                     self.update_preview_mesh(context, muscle_name, target_collection)
-                    context.area.tag_redraw()
+                    
+                    # Force viewport redraw
+                    for area in context.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            area.tag_redraw()
             
             return {'PASS_THROUGH'}
             
@@ -473,7 +560,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             self._preview_object = None
     
     def get_curve_hash(self, curve_obj):
-        """Create a more sensitive hash of curve point positions"""
+        """Create a more sensitive hash of curve point positions and radius/weights"""
         if not curve_obj or not curve_obj.data.splines:
             return 0
         
@@ -483,19 +570,26 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         if spline.type in ['NURBS', 'POLY']:
             for i, point in enumerate(spline.points):
                 world_co = curve_obj.matrix_world @ Vector(point.co[:3])
+                # Include weight value (4th component) for diameter control
+                weight = point.co[3] if len(point.co) > 3 else 1.0
                 # Use higher precision for more sensitive detection
-                hash_val += hash((round(world_co.x, 6), round(world_co.y, 6), round(world_co.z, 6), i))
+                hash_val += hash((
+                    round(world_co.x, 6), round(world_co.y, 6), round(world_co.z, 6), 
+                    round(weight, 4), i
+                ))
         elif spline.type == 'BEZIER':
             for i, point in enumerate(spline.bezier_points):
                 world_co = curve_obj.matrix_world @ point.co
                 # Include handle positions for Bezier curves
                 handle_left = curve_obj.matrix_world @ point.handle_left
                 handle_right = curve_obj.matrix_world @ point.handle_right
+                # Include radius for diameter control
+                radius = point.radius
                 hash_val += hash((
                     round(world_co.x, 6), round(world_co.y, 6), round(world_co.z, 6),
                     round(handle_left.x, 6), round(handle_left.y, 6), round(handle_left.z, 6),
                     round(handle_right.x, 6), round(handle_right.y, 6), round(handle_right.z, 6),
-                    i
+                    round(radius, 4), i
                 ))
         
         return hash_val
@@ -504,7 +598,9 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         """Create hash of density control values to detect changes"""
         return hash((
             context.scene.muscle_curve_subdivisions,
-            context.scene.muscle_contour_resolution
+            context.scene.muscle_contour_resolution,
+            getattr(context.scene, 'muscle_use_spline_diameter', True),
+            getattr(context.scene, 'muscle_diameter_smoothing', 0.5)
         ))
     
     def update_preview_mesh(self, context, muscle_name, target_collection):
@@ -561,10 +657,16 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return False
     
     def create_simple_preview_mesh(self, context, curve_obj, origin_contour, insertion_contour):
-        """Create preview mesh using user-controlled density settings"""
+        """Create preview mesh using spline-based diameter control and proper orientation"""
         bm = bmesh.new()
         
         try:
+            # Import spline utilities
+            from .spline_lofting_utilities import (get_spline_diameter_at_parameter, 
+                                                  calculate_frenet_frame,
+                                                  apply_spline_based_scaling,
+                                                  smooth_diameter_transitions)
+            
             # Use user-defined curve subdivisions for preview (reduced for performance)
             curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))  # 60% for preview
             curve_points = self.get_curve_sample_points(curve_obj, curve_subdivisions)
@@ -588,11 +690,40 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             origin_resampled = self.simple_resample(origin_loop, target_count)
             insertion_resampled = self.simple_resample(insertion_loop, target_count)
             
-            # Create vertex loops along curve
+            # Get spline diameter control settings
+            use_spline_diameter = getattr(context.scene, 'muscle_use_spline_diameter', True)
+            diameter_smoothing = getattr(context.scene, 'muscle_diameter_smoothing', 0.5)
+            
+            # Calculate diameter scales for each point along the curve using spline data
+            diameter_scales = []
+            for i in range(len(curve_points)):
+                t = i / (len(curve_points) - 1) if len(curve_points) > 1 else 0.0
+                
+                if use_spline_diameter:
+                    # Get diameter from curve point weights/radius
+                    diameter_scale = get_spline_diameter_at_parameter(curve_obj, t)
+                else:
+                    diameter_scale = 1.0
+                
+                diameter_scales.append(diameter_scale)
+            
+            # Apply smoothing to diameter transitions
+            if diameter_smoothing > 0.0:
+                diameter_scales = smooth_diameter_transitions(diameter_scales, diameter_smoothing)
+            
+            # Create vertex loops along curve with spline-based diameter control and proper orientation
             vertex_loops = []
+            
+            # Reset frame calculation for consistent orientation
+            if hasattr(calculate_frenet_frame, 'prev_normal'):
+                delattr(calculate_frenet_frame, 'prev_normal')
             
             for i, curve_point in enumerate(curve_points):
                 t = i / (len(curve_points) - 1) if len(curve_points) > 1 else 0.0
+                diameter_scale = diameter_scales[i]
+                
+                # Calculate proper Frenet frame for orientation
+                tangent, normal, binormal = calculate_frenet_frame(curve_points, i, diameter_smoothing)
                 
                 # Calculate interpolated centroid position
                 interpolated_centroid = origin_centroid.lerp(insertion_centroid, t)
@@ -601,7 +732,10 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 original_line_point = origin_centroid.lerp(insertion_centroid, t)
                 curve_offset = curve_point - original_line_point
                 
-                # Create interpolated loop that follows the curve
+                # Final center position for this cross-section
+                section_center = interpolated_centroid + curve_offset
+                
+                # Create interpolated loop that follows the curve with spline-based scaling
                 interpolated_loop = []
                 for j in range(target_count):
                     origin_vert = origin_resampled[j]
@@ -611,12 +745,22 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                     interpolated_pos = origin_vert.lerp(insertion_vert, t)
                     
                     # Apply curve offset to make it follow the curve path
-                    final_pos = interpolated_pos + curve_offset
-                    interpolated_loop.append(final_pos)
+                    curve_following_pos = interpolated_pos + curve_offset
+                    
+                    interpolated_loop.append(curve_following_pos)
+                
+                # Apply spline-based scaling with proper orientation
+                if use_spline_diameter and diameter_scale != 1.0:
+                    scaled_loop = apply_spline_based_scaling(
+                        interpolated_loop, section_center, diameter_scale, 
+                        tangent, normal, binormal
+                    )
+                else:
+                    scaled_loop = interpolated_loop
                 
                 # Add vertices to bmesh
                 loop_verts = []
-                for vert_co in interpolated_loop:
+                for vert_co in scaled_loop:
                     vert = bm.verts.new(vert_co)
                     loop_verts.append(vert)
                 
@@ -794,6 +938,33 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 # Skip if face creation fails
                 continue
 
+    def calculate_curve_tangent(self, curve_points, index):
+        """
+        Calculate the tangent vector at a specific point along the curve
+        
+        Args:
+            curve_points: List of Vector points along the curve
+            index: Index of the current point
+            
+        Returns:
+            Vector: Normalized tangent vector
+        """
+        if len(curve_points) < 2:
+            return Vector((1, 0, 0))  # Default tangent
+        
+        # Calculate tangent vector using finite differences
+        if index == 0:
+            # At start, use forward difference
+            tangent = (curve_points[1] - curve_points[0]).normalized()
+        elif index == len(curve_points) - 1:
+            # At end, use backward difference
+            tangent = (curve_points[-1] - curve_points[-2]).normalized()
+        else:
+            # In middle, use central difference for smoother results
+            tangent = (curve_points[index + 1] - curve_points[index - 1]).normalized()
+        
+        return tangent
+
 
 class Muscle_Preview_Stop_Op(bpy.types.Operator):
     """Stop the muscle preview mode"""
@@ -822,4 +993,176 @@ class Muscle_Preview_Stop_Op(bpy.types.Operator):
                     pass
         
         self.report({'INFO'}, "Preview stopped")
+        return {'FINISHED'}
+
+
+class Muscle_Set_Curve_Weights_Op(bpy.types.Operator):
+    """Set weights on curve points for diameter control"""
+    bl_idname = "view3d.muscle_set_curve_weights"
+    bl_label = "Set Curve Point Weights"
+    bl_description = "Set weights on curve control points to control muscle diameter"
+    
+    weight_value: bpy.props.FloatProperty(
+        name="Weight",
+        description="Weight value for selected curve points (affects diameter)",
+        default=1.0,
+        min=0.1,
+        max=3.0,
+        precision=2,
+        step=0.1
+    )
+    
+    def execute(self, context):
+        # Get active object
+        if not context.active_object or context.active_object.type != 'CURVE':
+            self.report({'ERROR'}, "Please select a curve object and enter Edit mode")
+            return {'CANCELLED'}
+        
+        curve_obj = context.active_object
+        
+        if context.mode != 'EDIT_CURVE':
+            self.report({'ERROR'}, "Please enter Edit mode on the curve")
+            return {'CANCELLED'}
+        
+        # Get the curve data
+        spline_data = curve_obj.data.splines
+        if not spline_data:
+            self.report({'ERROR'}, "No splines found in curve")
+            return {'CANCELLED'}
+        
+        # Set weights on selected points
+        modified_points = 0
+        
+        for spline in spline_data:
+            if spline.type in ['NURBS', 'POLY']:
+                for point in spline.points:
+                    if point.select:
+                        # For NURBS points, the weight is the 4th component
+                        point.co = (point.co[0], point.co[1], point.co[2], self.weight_value)
+                        modified_points += 1
+            elif spline.type == 'BEZIER':
+                for point in spline.bezier_points:
+                    if point.select_control_point:
+                        # For Bezier points, use the radius property
+                        point.radius = self.weight_value
+                        modified_points += 1
+        
+        if modified_points > 0:
+            # Update the curve properly
+            curve_obj.data.update_tag()
+            
+            # Trigger preview update if active
+            if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
+                # Force immediate viewport update
+                for area in context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+                
+                # Force scene and view layer update
+                context.view_layer.update()
+                
+                # Force depsgraph update to ensure changes are propagated
+                context.evaluated_depsgraph_get().update()
+            
+            self.report({'INFO'}, f"Set weight {self.weight_value:.2f} on {modified_points} curve points")
+        else:
+            self.report({'WARNING'}, "No curve points selected")
+        
+        return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+
+class Muscle_Set_Default_Curve_Weights_Op(bpy.types.Operator):
+    """Set default muscle-like weights on all curve points"""
+    bl_idname = "view3d.muscle_set_default_curve_weights"
+    bl_label = "Set Default Muscle Weights"
+    bl_description = "Set default muscle-like radius values on all curve points (thicker in middle, tapered at ends)"
+    
+    def execute(self, context):
+        # Get active object
+        if not context.active_object or context.active_object.type != 'CURVE':
+            self.report({'ERROR'}, "Please select a curve object")
+            return {'CANCELLED'}
+        
+        curve_obj = context.active_object
+        
+        # Get the curve data
+        spline_data = curve_obj.data.splines
+        if not spline_data:
+            self.report({'ERROR'}, "No splines found in curve")
+            return {'CANCELLED'}
+        
+        # Set default muscle weights on all points
+        modified_points = 0
+        
+        for spline in spline_data:
+            if spline.type == 'BEZIER':
+                points = spline.bezier_points
+                num_points = len(points)
+                
+                if num_points < 2:
+                    continue
+                
+                for i, point in enumerate(points):
+                    # Calculate muscle-like radius based on position
+                    if i == 0 or i == num_points - 1:
+                        # End points - tapered for attachment
+                        point.radius = 0.8
+                    elif i == num_points // 2:
+                        # Middle point - thicker for muscle belly
+                        point.radius = 1.4
+                    else:
+                        # Transition points - gradual change
+                        distance_from_center = abs(i - num_points // 2)
+                        max_distance = num_points // 2
+                        # Linear interpolation from center (1.4) to ends (0.8)
+                        point.radius = 1.4 - (distance_from_center / max_distance) * 0.6
+                    
+                    modified_points += 1
+                    
+            elif spline.type in ['NURBS', 'POLY']:
+                points = spline.points
+                num_points = len(points)
+                
+                if num_points < 2:
+                    continue
+                
+                for i, point in enumerate(points):
+                    # Calculate muscle-like weight based on position
+                    if i == 0 or i == num_points - 1:
+                        # End points - tapered
+                        weight = 0.8
+                    elif i == num_points // 2:
+                        # Middle point - thicker
+                        weight = 1.4
+                    else:
+                        # Transition points
+                        distance_from_center = abs(i - num_points // 2)
+                        max_distance = num_points // 2
+                        weight = 1.4 - (distance_from_center / max_distance) * 0.6
+                    
+                    # For NURBS points, the weight is the 4th component
+                    point.co = (point.co[0], point.co[1], point.co[2], weight)
+                    modified_points += 1
+        
+        if modified_points > 0:
+            # Update the curve properly
+            curve_obj.data.update_tag()
+            
+            # Trigger preview update if active
+            if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
+                # Force immediate viewport update
+                for area in context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+                
+                context.view_layer.update()
+                context.evaluated_depsgraph_get().update()
+            
+            self.report({'INFO'}, f"Set default muscle weights on {modified_points} curve points")
+        else:
+            self.report({'WARNING'}, "No curve points found")
+        
         return {'FINISHED'}
