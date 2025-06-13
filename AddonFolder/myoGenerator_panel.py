@@ -95,18 +95,6 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         row.operator("view3d.muscle_finalize", text="Finalize Muscle", icon='CHECKMARK')
 
         layout.separator()
-
-        # Validation and utilities section
-        subbox = box.box()
-        subbox.label(text="Validation & Utilities")
-        row = subbox.row()
-        row.operator("view3d.muscle_validation", text="Validate Setup", icon='CHECKMARK')
-        row.operator("view3d.muscle_cleanup", text="Clean Up", icon='TRASH')
-        
-        row = subbox.row()
-        row.operator("view3d.muscle_debug_alignment", text="Debug Alignment", icon='ZOOM_SELECTED')
-
-        layout.separator()
         
         box = layout.box()
         box.label(text="Finish")

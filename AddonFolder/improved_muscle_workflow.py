@@ -595,14 +595,9 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             # Check if curve has changed
             current_curve_hash = self.get_curve_hash(curve_obj)
             if current_curve_hash != self._last_curve_hash:
-                print(f"Curve changed - old hash: {self._last_curve_hash}, new hash: {current_curve_hash}")
                 self._last_curve_hash = current_curve_hash
                 self.update_preview_mesh(context, muscle_name, target_collection)
                 context.area.tag_redraw()
-            # Debug: Print first curve point to see if it's actually changing
-            curve_points = self.get_curve_sample_points(curve_obj, 6)
-            if curve_points:
-                print(f"First curve point: {curve_points[0]}")
             
             return {'PASS_THROUGH'}
             
@@ -754,8 +749,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 print("Missing contour vertices")
                 return None
             
-            print(f"Preview: curve points: {len(curve_points)}, origin: {len(origin_loop)}, insertion: {len(insertion_loop)}")
-            
             # Calculate original centroids
             origin_centroid = sum(origin_loop, Vector()) / len(origin_loop)
             insertion_centroid = sum(insertion_loop, Vector()) / len(insertion_loop)
@@ -847,7 +840,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             bm.to_mesh(mesh)
             mesh.update()
             
-            print(f"Preview mesh created: {len(mesh.vertices)} verts, {len(mesh.polygons)} faces")
             return mesh
             
         except Exception as e:
@@ -1009,145 +1001,6 @@ class Muscle_Finalize_Op(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class Muscle_Validation_Op(bpy.types.Operator):
-    """Validate muscle setup and provide diagnostics"""
-    bl_idname = "view3d.muscle_validation"
-    bl_label = "Validate Muscle Setup"
-    bl_description = "Check if all required objects exist and are properly configured"
-    
-    def execute(self, context):
-        muscle_name = context.scene.muscle_Name
-        
-        if muscle_name == "Insert muscle name":
-            self.report({'ERROR'}, "Please enter a muscle name first")
-            return {'CANCELLED'}
-        
-        # Get muscle collection
-        muscles_collection = bpy.data.collections.get("muscles")
-        if not muscles_collection:
-            self.report({'ERROR'}, "No 'muscles' collection found")
-            return {'CANCELLED'}
-        
-        if muscle_name not in muscles_collection.children:
-            self.report({'ERROR'}, f"Muscle collection '{muscle_name}' not found")
-            return {'CANCELLED'}
-        
-        target_collection = muscles_collection.children[muscle_name]
-        
-        # Check required objects
-        required_objects = {
-            f"{muscle_name}_origin": "Origin mesh",
-            f"{muscle_name}_insertion": "Insertion mesh", 
-            f"{muscle_name}_origin_contour": "Origin contour curve",
-            f"{muscle_name}_insertion_contour": "Insertion contour curve"
-        }
-        
-        optional_objects = {
-            f"{muscle_name}_curve": "Muscle path curve",
-            f"{muscle_name}_muscle": "Muscle mesh object"
-        }
-        
-        missing_required = []
-        missing_optional = []
-        validation_warnings = []
-        
-        # Check required objects
-        for obj_name, description in required_objects.items():
-            if obj_name not in target_collection.objects:
-                missing_required.append(f"{description} ({obj_name})")
-            else:
-                obj = target_collection.objects[obj_name]
-                # Additional validation for specific object types
-                if "contour" in obj_name and obj.type != 'CURVE':
-                    validation_warnings.append(f"{description} should be a curve object")
-                elif "origin" in obj_name or "insertion" in obj_name:
-                    if obj.type == 'MESH' and len(obj.data.vertices) == 0:
-                        validation_warnings.append(f"{description} has no vertices")
-        
-        # Check optional objects
-        for obj_name, description in optional_objects.items():
-            if obj_name not in target_collection.objects:
-                missing_optional.append(f"{description} ({obj_name})")
-        
-        # Generate report
-        report_lines = []
-        
-        if missing_required:
-            report_lines.append("MISSING REQUIRED OBJECTS:")
-            for item in missing_required:
-                report_lines.append(f"  - {item}")
-            self.report({'ERROR'}, "Missing required objects. Check console for details.")
-        
-        if missing_optional:
-            report_lines.append("MISSING OPTIONAL OBJECTS:")
-            for item in missing_optional:
-                report_lines.append(f"  - {item}")
-        
-        if validation_warnings:
-            report_lines.append("VALIDATION WARNINGS:")
-            for warning in validation_warnings:
-                report_lines.append(f"  - {warning}")
-        
-        if not missing_required and not validation_warnings:
-            report_lines.append("✓ All required objects present and valid")
-            if not missing_optional:
-                report_lines.append("✓ Complete muscle setup - ready for final generation")
-            else:
-                report_lines.append("→ Ready for curve creation")
-            self.report({'INFO'}, "Muscle setup validation passed")
-        
-        # Print detailed report to console
-        print(f"\n=== MUSCLE VALIDATION REPORT: {muscle_name} ===")
-        for line in report_lines:
-            print(line)
-        print("=" * 50)
-        
-        return {'FINISHED'}
-
-
-class Muscle_Cleanup_Op(bpy.types.Operator):
-    """Clean up muscle objects and reset for new creation"""
-    bl_idname = "view3d.muscle_cleanup"
-    bl_label = "Clean Up Muscle"
-    bl_description = "Remove all objects for current muscle to start fresh"
-    
-    def execute(self, context):
-        muscle_name = context.scene.muscle_Name
-        
-        if muscle_name == "Insert muscle name":
-            self.report({'ERROR'}, "Please enter a muscle name first")
-            return {'CANCELLED'}
-        
-        # Get muscle collection
-        muscles_collection = bpy.data.collections.get("muscles")
-        if not muscles_collection:
-            self.report({'INFO'}, "No muscle collection to clean up")
-            return {'FINISHED'}
-        
-        if muscle_name not in muscles_collection.children:
-            self.report({'INFO'}, f"No muscle collection '{muscle_name}' found")
-            return {'FINISHED'}
-        
-        target_collection = muscles_collection.children[muscle_name]
-        
-        # Remove all objects in the collection
-        objects_to_remove = list(target_collection.objects)
-        
-        for obj in objects_to_remove:
-            # Remove object from all collections
-            for collection in obj.users_collection:
-                collection.objects.unlink(obj)
-            # Remove object data
-            bpy.data.objects.remove(obj, do_unlink=True)
-        
-        # Remove the collection itself
-        muscles_collection.children.unlink(target_collection)
-        bpy.data.collections.remove(target_collection)
-        
-        self.report({'INFO'}, f"Cleaned up muscle '{muscle_name}' - ready to start fresh")
-        return {'FINISHED'}
-
-
 class Muscle_Preview_Stop_Op(bpy.types.Operator):
     """Stop the muscle preview mode"""
     bl_idname = "view3d.muscle_preview_stop"
@@ -1172,82 +1025,3 @@ class Muscle_Preview_Stop_Op(bpy.types.Operator):
         
         self.report({'INFO'}, "Preview stopped")
         return {'FINISHED'}
-
-
-class Muscle_Debug_Alignment_Op(bpy.types.Operator):
-    """Debug tool to visualize contour alignment"""
-    bl_idname = "view3d.muscle_debug_alignment"
-    bl_label = "Debug Contour Alignment"
-    bl_description = "Create visual markers to debug contour alignment issues"
-    
-    def execute(self, context):
-        muscle_name = context.scene.muscle_Name
-        
-        # Get muscle collection
-        muscles_collection = bpy.data.collections.get("muscles")
-        if not muscles_collection or muscle_name not in muscles_collection.children:
-            self.report({'ERROR'}, f"Collection '{muscle_name}' not found")
-            return {'CANCELLED'}
-        
-        target_collection = muscles_collection.children[muscle_name]
-        
-        # Get contour objects
-        origin_contour = target_collection.objects.get(muscle_name + "_origin_contour")
-        insertion_contour = target_collection.objects.get(muscle_name + "_insertion_contour")
-        
-        if not origin_contour or not insertion_contour:
-            self.report({'ERROR'}, "Origin and insertion contours required")
-            return {'CANCELLED'}
-        
-        # Create debug visualization
-        self.create_alignment_markers(target_collection, origin_contour, insertion_contour, muscle_name)
-        
-        self.report({'INFO'}, "Debug markers created - check vertex numbering and alignment")
-        return {'FINISHED'}
-    
-    def create_alignment_markers(self, collection, origin_contour, insertion_contour, muscle_name):
-        """Create numbered markers to visualize vertex alignment"""
-        
-        # Get contour vertices
-        origin_vertices = self.get_contour_vertices(origin_contour)
-        insertion_vertices = self.get_contour_vertices(insertion_contour)
-        
-        # Create text objects at each vertex to show numbering
-        for i, vert in enumerate(origin_vertices):
-            self.create_text_marker(collection, vert, f"O{i}", f"{muscle_name}_origin_marker_{i}")
-        
-        for i, vert in enumerate(insertion_vertices):
-            self.create_text_marker(collection, vert, f"I{i}", f"{muscle_name}_insertion_marker_{i}")
-    
-    def create_text_marker(self, collection, location, text, name):
-        """Create a text object at the specified location"""
-        # Create text object
-        bpy.ops.object.text_add(location=location)
-        text_obj = bpy.context.object
-        text_obj.name = name
-        text_obj.data.body = text
-        text_obj.scale = (0.1, 0.1, 0.1)  # Small scale
-        
-        # Move to target collection
-        for coll in text_obj.users_collection:
-            coll.objects.unlink(text_obj)
-        collection.objects.link(text_obj)
-    
-    def get_contour_vertices(self, contour_obj):
-        """Extract vertices from contour curve"""
-        if not contour_obj or contour_obj.type != 'CURVE':
-            return []
-        
-        vertices = []
-        spline = contour_obj.data.splines[0] if contour_obj.data.splines else None
-        
-        if spline and spline.type in ['NURBS', 'POLY']:
-            for point in spline.points:
-                world_co = contour_obj.matrix_world @ Vector(point.co[:3])
-                vertices.append(world_co)
-        elif spline and spline.type == 'BEZIER':
-            for point in spline.bezier_points:
-                world_co = contour_obj.matrix_world @ point.co
-                vertices.append(world_co)
-        
-        return vertices
