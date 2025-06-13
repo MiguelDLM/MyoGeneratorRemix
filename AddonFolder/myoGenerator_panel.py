@@ -2,11 +2,12 @@ import bpy
 
 class MYOGENERATOR_PT_panel(bpy.types.Panel):
     bl_idname = "MYOGENERATOR_PT_panel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
     bl_label = "MyoGeneratorRemix"
     bl_category = "MyoGeneratorRemix"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-
+    bl_options = {'DEFAULT_CLOSED'}
+    
     def draw(self, context):
         layout = self.layout
 
@@ -65,36 +66,45 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
 
         layout.separator()
 
+        # New improved workflow section
         box = layout.box()
-        box.label(text="Muscle Creation")
-        row = box.row()
-        row.operator("view3d.muscle_creation",text="Create muscle")
+        box.label(text="Muscle Creation Workflow", icon='CURVE_BEZCURVE')
+        
+        # Stage 1: Curve Creation
+        subbox = box.box()
+        subbox.label(text="Stage 1: Create & Adjust Path")
+        row = subbox.row()
+        row.operator("view3d.muscle_curve_creation", text="Create Muscle Path", icon='CURVE_PATH')
+        
+        row = subbox.row()
+        row.label(text="Manual curve adjustment in Edit Mode")
+        row = subbox.row()
+        # Check if preview is active to show appropriate button
+        if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
+            row.operator("view3d.muscle_preview_stop", text="Stop Preview", icon='PAUSE')
+        else:
+            row.operator("view3d.muscle_preview_update", text="Start Preview", icon='PLAY')
+        
+        # Stage 2: Mesh Generation
+        subbox = box.box()
+        subbox.label(text="Stage 2: Generate Final Mesh")
+        row = subbox.row()
+        row.operator("view3d.muscle_mesh_generation", text="Generate Mesh", icon='MESH_CUBE')
+        
+        row = subbox.row()
+        row.operator("view3d.muscle_finalize", text="Finalize Muscle", icon='CHECKMARK')
 
-        row = box.row()
-        # add an input field for the number subvisions
-        row.prop(context.scene, "muscle_subdivisions", text="Subdivisions")
+        layout.separator()
 
-        row = box.row()
-        #add resampling number  
-        row.prop(context.scene, "muscle_resampling", text="Resampling")
-
-        row = box.row()
-        row.prop(context.scene, "origin_rotation", text="Origin vertex rotation")
-
-        row = box.row()
-        row.prop(context.scene, "insertion_rotation", text="Insertion vertex rotation")
-
-        row = box.row()
-        row.operator("view3d.swap_origin_insertion", text="Swap Origin and Insertion")
-
-        row = box.row()
-        row.operator("view3d.switch_vertex_order_origin", text="Switch Origin Vertex Order")
-
-        row = box.row()
-        row.operator("view3d.switch_vertex_order_insertion", text="Switch Insertion Vertex Order")
-
-        row = box.row()
-        row.operator("view3d.muscle_volume_creator", text="Create Muscle volume")
+        # Validation and utilities section
+        subbox = box.box()
+        subbox.label(text="Validation & Utilities")
+        row = subbox.row()
+        row.operator("view3d.muscle_validation", text="Validate Setup", icon='CHECKMARK')
+        row.operator("view3d.muscle_cleanup", text="Clean Up", icon='TRASH')
+        
+        row = subbox.row()
+        row.operator("view3d.muscle_debug_alignment", text="Debug Alignment", icon='ZOOM_SELECTED')
 
         layout.separator()
         

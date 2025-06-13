@@ -14,7 +14,7 @@
 import bpy
 
 from .muscle_selection import (Muscle_Name_Submition, Select_Origin_Op,
-                              Select_Insertion_Op, Submit_Origin_Op,
+                              Select_Insertion_Op, Submit_Origin_Op,    
                               Submit_Insertion_Op, Next_Muscle_Op)
 from .muscle_creation import (Muscle_Creation_Op, Muscle_Volume_Creation_Op)
 from .muscle_modifications import (Swap_Origin_Insertion_Op, 
@@ -23,6 +23,14 @@ from .muscle_modifications import (Swap_Origin_Insertion_Op,
 from .muscle_parameters import Calculate_Muscle_Parameters_Op
 from .muscle_utilities import (update_muscle_subdivision, update_muscle_resampling,
                              update_insertion_rotation, update_origin_rotation)
+from .improved_muscle_workflow import (Muscle_Curve_Creation_Op, 
+                                     Muscle_Mesh_Generation_Op,
+                                     Muscle_Preview_Update_Op,
+                                     Muscle_Preview_Stop_Op,
+                                     Muscle_Finalize_Op,
+                                     Muscle_Validation_Op,
+                                     Muscle_Cleanup_Op,
+                                     Muscle_Debug_Alignment_Op)
 from .myoGenerator_panel import MYOGENERATOR_PT_panel
 
 
@@ -41,6 +49,16 @@ def register():
     bpy.utils.register_class(Switch_Origin_Vertex_Order_Op)
     bpy.utils.register_class(Calculate_Muscle_Parameters_Op)
     bpy.utils.register_class(Next_Muscle_Op)
+    
+    # Register improved workflow classes
+    bpy.utils.register_class(Muscle_Curve_Creation_Op)
+    bpy.utils.register_class(Muscle_Mesh_Generation_Op)
+    bpy.utils.register_class(Muscle_Preview_Update_Op)
+    bpy.utils.register_class(Muscle_Preview_Stop_Op)
+    bpy.utils.register_class(Muscle_Finalize_Op)
+    bpy.utils.register_class(Muscle_Validation_Op)
+    bpy.utils.register_class(Muscle_Cleanup_Op)
+    bpy.utils.register_class(Muscle_Debug_Alignment_Op)
 
 
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
@@ -133,6 +151,16 @@ def unregister():
     bpy.utils.unregister_class(Switch_Origin_Vertex_Order_Op)
     bpy.utils.unregister_class(Calculate_Muscle_Parameters_Op)
     bpy.utils.unregister_class(Next_Muscle_Op)
+    
+    # Unregister improved workflow classes
+    bpy.utils.unregister_class(Muscle_Curve_Creation_Op)
+    bpy.utils.unregister_class(Muscle_Mesh_Generation_Op)
+    bpy.utils.unregister_class(Muscle_Preview_Update_Op)
+    bpy.utils.unregister_class(Muscle_Preview_Stop_Op)
+    bpy.utils.unregister_class(Muscle_Finalize_Op)
+    bpy.utils.unregister_class(Muscle_Validation_Op)
+    bpy.utils.unregister_class(Muscle_Cleanup_Op)
+    bpy.utils.unregister_class(Muscle_Debug_Alignment_Op)
 
 
     del bpy.types.Scene.muscle_Name
