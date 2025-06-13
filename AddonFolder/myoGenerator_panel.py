@@ -66,33 +66,39 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
 
         layout.separator()
 
-        # New improved workflow section
+        # Muscle Creation Workflow - simplified single section
         box = layout.box()
-        box.label(text="Muscle Creation Workflow", icon='CURVE_BEZCURVE')
+        box.label(text="Muscle Creation", icon='CURVE_BEZCURVE')
         
-        # Stage 1: Curve Creation
-        subbox = box.box()
-        subbox.label(text="Stage 1: Create & Adjust Path")
-        row = subbox.row()
+        # Create muscle path
+        row = box.row()
         row.operator("view3d.muscle_curve_creation", text="Create Muscle Path", icon='CURVE_PATH')
         
-        row = subbox.row()
+        row = box.row()
         row.label(text="Manual curve adjustment in Edit Mode")
-        row = subbox.row()
-        # Check if preview is active to show appropriate button
+        
+        # Preview controls
+        row = box.row()
         if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
             row.operator("view3d.muscle_preview_stop", text="Stop Preview", icon='PAUSE')
         else:
             row.operator("view3d.muscle_preview_update", text="Start Preview", icon='PLAY')
         
-        # Stage 2: Mesh Generation
-        subbox = box.box()
-        subbox.label(text="Stage 2: Generate Final Mesh")
-        row = subbox.row()
-        row.operator("view3d.muscle_mesh_generation", text="Generate Mesh", icon='MESH_CUBE')
+        # Mesh Density Controls
+        row = box.row()
+        row.label(text="Mesh Density Controls:", icon='MESH_ICOSPHERE')
         
-        row = subbox.row()
-        row.operator("view3d.muscle_finalize", text="Finalize Muscle", icon='CHECKMARK')
+        # Curve subdivisions
+        row = box.row()
+        row.prop(context.scene, "muscle_curve_subdivisions", text="Curve Subdivisions")
+        
+        # Contour resolution
+        row = box.row()
+        row.prop(context.scene, "muscle_contour_resolution", text="Contour Resolution")
+        
+        # Generate final mesh
+        row = box.row()
+        row.operator("view3d.muscle_mesh_generation", text="Generate Final Mesh", icon='MESH_CUBE')
 
         layout.separator()
         

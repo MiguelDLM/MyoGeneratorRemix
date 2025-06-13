@@ -79,10 +79,27 @@ class Muscle_Curve_Creation_Op(bpy.types.Operator):
         self.remap_objects(curve_obj, target_collection)
         
         # Set curve as active for user manipulation
-        bpy.ops.object.select_all(action='DESELECT')
-        curve_obj.select_set(True)
-        context.view_layer.objects.active = curve_obj
-        bpy.ops.object.mode_set(mode='EDIT')
+        try:
+            # Ensure we have a valid 3D view context
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    with context.temp_override(area=area):
+                        bpy.ops.object.select_all(action='DESELECT')
+                        curve_obj.select_set(True)
+                        context.view_layer.objects.active = curve_obj
+                        bpy.ops.object.mode_set(mode='EDIT')
+                    break
+            else:
+                # Fallback if no 3D view found
+                curve_obj.select_set(True)
+                context.view_layer.objects.active = curve_obj
+                if curve_obj.type == 'CURVE':
+                    bpy.ops.object.mode_set(mode='EDIT')
+        except RuntimeError as e:
+            # If operations fail, just set as active and report
+            curve_obj.select_set(True)
+            context.view_layer.objects.active = curve_obj
+            self.report({'WARNING'}, f"Could not enter edit mode: {str(e)}")
         
         self.report({'INFO'}, "Muscle curve created. You can now adjust the path manually.")
         return {'FINISHED'}
@@ -165,10 +182,10 @@ class Muscle_Curve_Creation_Op(bpy.types.Operator):
 
 
 class Muscle_Mesh_Generation_Op(bpy.types.Operator):
-    """Generate the final muscle mesh using bmesh lofting"""
+    """Generate the final muscle mesh by keeping the current preview mesh"""
     bl_idname = "view3d.muscle_mesh_generation"
-    bl_label = "Generate Muscle Mesh"
-    bl_description = "Generate the final muscle mesh with volume using bmesh lofting between origin and insertion"
+    bl_label = "Generate Final Mesh"
+    bl_description = "Convert the current preview mesh to the final muscle mesh - this completes the muscle creation process"
     
     def execute(self, context):
         muscle_name = context.scene.muscle_Name
@@ -181,379 +198,59 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         
         target_collection = muscles_collection.children[muscle_name]
         
-        # Get required objects
-        curve_obj = target_collection.objects.get(muscle_name + "_curve")
-        origin_contour = target_collection.objects.get(muscle_name + "_origin_contour")
-        insertion_contour = target_collection.objects.get(muscle_name + "_insertion_contour")
+        # Look for the preview object
+        preview_obj = target_collection.objects.get(muscle_name + "_preview")
         
-        # Validate inputs
-        validation_errors = validate_lofting_inputs(curve_obj, origin_contour, insertion_contour)
-        if validation_errors:
-            self.report({'ERROR'}, f"Validation failed: {'; '.join(validation_errors)}")
+        if not preview_obj:
+            self.report({'ERROR'}, "No preview mesh found. Start preview mode first.")
             return {'CANCELLED'}
         
+        # Stop preview mode first
+        if hasattr(context.scene, 'muscle_preview_active'):
+            context.scene.muscle_preview_active = False
+        
+        # Ensure we're in object mode before doing object operations
+        if context.active_object and context.active_object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Rename the preview object to be the final muscle mesh
+        final_name = muscle_name + "_muscle"
+        
+        # Remove any existing muscle mesh with the same name
+        existing_muscle = target_collection.objects.get(final_name)
+        if existing_muscle:
+            bpy.data.objects.remove(existing_muscle, do_unlink=True)
+        
+        # Rename preview to final muscle mesh
+        preview_obj.name = final_name
+        
+        # Remove preview material and apply default material
+        if preview_obj.data.materials:
+            preview_obj.data.materials.clear()
+        
+        # Make sure it's visible (not transparent)
+        preview_obj.show_transparent = False
+        
+        # Select the new muscle object safely
         try:
-            # Create muscle mesh using bmesh lofting
-            muscle_obj = self.create_muscle_mesh_bmesh(
-                context, 
-                muscle_name, 
-                curve_obj, 
-                origin_contour, 
-                insertion_contour, 
-                target_collection
-            )
-            
-            # Move to target collection
-            target_collection.objects.link(muscle_obj)
-            if muscle_obj.name in bpy.context.collection.objects:
-                bpy.context.collection.objects.unlink(muscle_obj)
-            
-            self.report({'INFO'}, "Muscle mesh generated successfully using bmesh!")
-            
-        except Exception as e:
-            self.report({'ERROR'}, f"Error creating muscle mesh: {str(e)}")
-            return {'CANCELLED'}
-            
-        return {'FINISHED'}
-    
-    def create_muscle_mesh_bmesh(self, context, muscle_name, curve_obj, origin_contour, insertion_contour, target_collection):
-        """Create muscle mesh using bmesh operations with proper curve following"""
-        
-        # Create new bmesh instance
-        bm = bmesh.new()
-        
-        try:
-            # Get curve points for creating cross-sections (higher resolution for final mesh)
-            curve_points = self.get_curve_sample_points(curve_obj, context.scene.muscle_resampling)
-            
-            if len(curve_points) < 2:
-                raise Exception("Curve must have at least 2 points")
-            
-            # Get contour loops
-            origin_loop = self.get_contour_vertices(origin_contour)
-            insertion_loop = self.get_contour_vertices(insertion_contour)
-            
-            if not origin_loop or not insertion_loop:
-                raise Exception("Both origin and insertion contours must have vertices")
-            
-            # Create vertex loops at each curve point following the curve path
-            vertex_loops = []
-            
-            for i, curve_point in enumerate(curve_points):
-                # Calculate parameter t along the curve (0 to 1)
-                t = i / (len(curve_points) - 1) if len(curve_points) > 1 else 0.0
-                
-                # Get curve frame (direction and normal) at this point
-                curve_direction, curve_normal, curve_binormal = self.get_curve_frame_at_point_detailed(curve_obj, curve_points, i)
-                
-                # Create transformation matrix for this curve position
-                transform_matrix = self.create_curve_transform_matrix(curve_point, curve_direction, curve_normal, curve_binormal)
-                
-                # Interpolate and transform contour to follow curve
-                interpolated_loop = self.interpolate_and_transform_contour_advanced(
-                    origin_loop, insertion_loop, t, transform_matrix, curve_point
-                )
-                
-                # Add vertices to bmesh
-                loop_verts = []
-                for vert_co in interpolated_loop:
-                    vert = bm.verts.new(vert_co)
-                    loop_verts.append(vert)
-                
-                vertex_loops.append(loop_verts)
-            
-            # Ensure face indices are valid
-            bm.verts.ensure_lookup_table()
-            
-            # Bridge consecutive loops to create faces
-            for i in range(len(vertex_loops) - 1):
-                current_loop = vertex_loops[i]
-                next_loop = vertex_loops[i + 1]
-                
-                # Create quad faces between loops
-                self.bridge_vertex_loops(bm, current_loop, next_loop)
-            
-            # Create end caps
-            if len(vertex_loops) > 0:
-                # Origin cap
-                origin_face_verts = vertex_loops[0]
-                if len(origin_face_verts) > 2:
-                    try:
-                        bm.faces.new(origin_face_verts)
-                    except ValueError:
-                        pass  # Skip if face creation fails
-                
-                # Insertion cap
-                insertion_face_verts = vertex_loops[-1]
-                if len(insertion_face_verts) > 2:
-                    try:
-                        bm.faces.new(reversed(insertion_face_verts))  # Reverse for correct normal
-                    except ValueError:
-                        pass  # Skip if face creation fails
-            
-            # Clean up mesh
-            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0001)
-            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-            
-            # Create mesh object
-            mesh = bpy.data.meshes.new(muscle_name + "_muscle")
-            bm.to_mesh(mesh)
-            muscle_obj = bpy.data.objects.new(muscle_name + "_muscle", mesh)
-            
-            return muscle_obj
-            
-        finally:
-            bm.free()
-    
-    def align_contour_loops(self, origin_loop, insertion_loop):
-        """Align two contour loops to minimize twisting during lofting"""
-        if not origin_loop or not insertion_loop:
-            return origin_loop, insertion_loop
-        
-        # Ensure both loops have the same number of vertices
-        target_count = max(len(origin_loop), len(insertion_loop))
-        origin_resampled = self.resample_loop_improved(origin_loop, target_count)
-        insertion_resampled = self.resample_loop_improved(insertion_loop, target_count)
-        
-        # Calculate centroids
-        origin_centroid = sum(origin_resampled, Vector()) / len(origin_resampled)
-        insertion_centroid = sum(insertion_resampled, Vector()) / len(insertion_resampled)
-        
-        # Find the best alignment by testing different starting points
-        best_offset = 0
-        min_twist = float('inf')
-        
-        for offset in range(len(insertion_resampled)):
-            # Rotate insertion loop by offset
-            rotated_insertion = insertion_resampled[offset:] + insertion_resampled[:offset]
-            
-            # Calculate total twist/distance for this alignment
-            total_twist = 0
-            for i in range(len(origin_resampled)):
-                # Calculate relative vectors from centroids
-                origin_rel = origin_resampled[i] - origin_centroid
-                insertion_rel = rotated_insertion[i] - insertion_centroid
-                
-                # Calculate angular difference (simplified)
-                origin_angle = origin_rel.xy.angle_signed(Vector((1, 0))) if origin_rel.xy.length > 0.001 else 0
-                insertion_angle = insertion_rel.xy.angle_signed(Vector((1, 0))) if insertion_rel.xy.length > 0.001 else 0
-                
-                angle_diff = abs(origin_angle - insertion_angle)
-                if angle_diff > 3.14159:  # π
-                    angle_diff = 2 * 3.14159 - angle_diff
-                
-                total_twist += angle_diff
-            
-            if total_twist < min_twist:
-                min_twist = total_twist
-                best_offset = offset
-        
-        # Apply best alignment
-        aligned_insertion = insertion_resampled[best_offset:] + insertion_resampled[:best_offset]
-        
-        return origin_resampled, aligned_insertion
-    
-    def resample_loop_improved(self, vertices, target_count):
-        """Improved resampling that preserves curve shape better"""
-        if len(vertices) == target_count:
-            return vertices
-        
-        if len(vertices) < 2:
-            return vertices * target_count if vertices else []
-        
-        # Calculate cumulative distances for arc-length parameterization
-        distances = [0.0]
-        total_length = 0.0
-        
-        for i in range(1, len(vertices)):
-            segment_length = (vertices[i] - vertices[i-1]).length
-            total_length += segment_length
-            distances.append(total_length)
-        
-        if total_length == 0:
-            return vertices * target_count if vertices else []
-        
-        # Resample at equal arc-length intervals
-        resampled = []
-        for i in range(target_count):
-            if target_count == 1:
-                target_distance = 0.0
-            else:
-                target_distance = (i / (target_count - 1)) * total_length
-            
-            # Find the segment containing this distance
-            for j in range(len(distances) - 1):
-                if distances[j] <= target_distance <= distances[j + 1]:
-                    # Interpolate within this segment
-                    if distances[j + 1] - distances[j] > 0:
-                        t = (target_distance - distances[j]) / (distances[j + 1] - distances[j])
-                    else:
-                        t = 0.0
-                    
-                    interpolated = vertices[j].lerp(vertices[j + 1], t)
-                    resampled.append(interpolated)
+            # Ensure we have a valid 3D view context
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    with context.temp_override(area=area):
+                        bpy.ops.object.select_all(action='DESELECT')
+                        preview_obj.select_set(True)
+                        context.view_layer.objects.active = preview_obj
                     break
             else:
-                # If not found, use the last vertex
-                resampled.append(vertices[-1])
+                # Fallback if no 3D view found
+                preview_obj.select_set(True)
+                context.view_layer.objects.active = preview_obj
+        except RuntimeError:
+            # If selection fails, just set as active
+            context.view_layer.objects.active = preview_obj
         
-        return resampled
-    
-    def get_curve_frame_at_point_detailed(self, curve_obj, curve_points, index):
-        """Get detailed frame (direction, normal, binormal) at curve point"""
-        if len(curve_points) < 2:
-            return Vector((0, 0, 1)), Vector((1, 0, 0)), Vector((0, 1, 0))
-        
-        # Calculate tangent direction
-        if index == 0:
-            direction = (curve_points[1] - curve_points[0]).normalized()
-        elif index == len(curve_points) - 1:
-            direction = (curve_points[-1] - curve_points[-2]).normalized()
-        else:
-            # Use central difference for smoother tangent
-            direction = (curve_points[index + 1] - curve_points[index - 1]).normalized()
-        
-        # Create orthonormal frame using Frenet frame approach
-        up = Vector((0, 0, 1))
-        
-        # If direction is too parallel to up vector, use different reference
-        if abs(direction.dot(up)) > 0.9:
-            up = Vector((1, 0, 0))
-        
-        # Calculate normal (perpendicular to direction in horizontal plane)
-        normal = direction.cross(up).normalized()
-        
-        # Calculate binormal (completes the orthonormal basis)
-        binormal = direction.cross(normal).normalized()
-        
-        return direction, normal, binormal
-    
-    def create_curve_transform_matrix(self, position, direction, normal, binormal):
-        """Create transformation matrix for curve frame"""
-        # Create rotation matrix from the orthonormal frame
-        rotation_matrix = Matrix((
-            normal,
-            binormal, 
-            direction
-        )).transposed()
-        
-        # Create full transformation matrix
-        transform_matrix = Matrix.Translation(position) @ rotation_matrix.to_4x4()
-        
-        return transform_matrix
-    
-    def interpolate_and_transform_contour_advanced(self, origin_loop, insertion_loop, t, transform_matrix, curve_point):
-        """Advanced interpolation and transformation that follows curve orientation"""
-        
-        # Ensure both loops have same number of vertices
-        target_count = max(len(origin_loop), len(insertion_loop))
-        origin_resampled = self.resample_loop_improved(origin_loop, target_count)
-        insertion_resampled = self.resample_loop_improved(insertion_loop, target_count)
-        
-        # Calculate centroids for proper positioning
-        origin_centroid = sum(origin_resampled, Vector()) / len(origin_resampled)
-        insertion_centroid = sum(insertion_resampled, Vector()) / len(insertion_resampled)
-        
-        # Calculate interpolated centroid
-        interpolated_centroid = origin_centroid.lerp(insertion_centroid, t)
-        
-        # Interpolate between contours
-        interpolated_loop = []
-        for i in range(target_count):
-            origin_vert = origin_resampled[i]
-            insertion_vert = insertion_resampled[i]
-            
-            # Interpolate position
-            interpolated_pos = origin_vert.lerp(insertion_vert, t)
-            
-            # Calculate relative position from interpolated centroid
-            relative_pos = interpolated_pos - interpolated_centroid
-            
-            # Apply curve transformation to position relative to curve point
-            final_pos = curve_point + relative_pos
-            
-            interpolated_loop.append(final_pos)
-        
-        return interpolated_loop
-    
-    def bridge_vertex_loops(self, bm, loop1, loop2):
-        """Create faces bridging two vertex loops with proper winding"""
-        if len(loop1) != len(loop2) or len(loop1) < 3:
-            return
-        
-        count = len(loop1)
-        
-        # Determine proper winding order by checking face normal direction
-        if count > 2:
-            # Test the normal direction of the first potential face
-            v1 = loop1[0]
-            v2 = loop1[1]
-            v3 = loop2[0]
-            
-            # Calculate normal of test triangle
-            edge1 = v2.co - v1.co
-            edge2 = v3.co - v1.co
-            test_normal = edge1.cross(edge2)
-            
-            # Compare with expected direction (should point outward from muscle)
-            center1 = sum([v.co for v in loop1], Vector()) / len(loop1)
-            center2 = sum([v.co for v in loop2], Vector()) / len(loop2)
-            expected_direction = (center2 - center1).normalized()
-            
-            # If normals are pointing in opposite directions, we need to reverse winding
-            reverse_winding = test_normal.dot(expected_direction) < 0
-        else:
-            reverse_winding = False
-        
-        # Create quad faces with proper winding order
-        for i in range(count):
-            next_i = (i + 1) % count
-            
-            if reverse_winding:
-                # Reverse winding order
-                v1 = loop1[i]
-                v2 = loop2[i]
-                v3 = loop2[next_i]
-                v4 = loop1[next_i]
-            else:
-                # Normal winding order
-                v1 = loop1[i]
-                v2 = loop1[next_i] 
-                v3 = loop2[next_i]
-                v4 = loop2[i]
-            
-            try:
-                # Check if vertices are coplanar and not degenerate
-                if self.is_valid_quad(v1, v2, v3, v4):
-                    bm.faces.new([v1, v2, v3, v4])
-            except ValueError:
-                # If quad creation fails, try creating triangles
-                try:
-                    bm.faces.new([v1, v2, v3])
-                    bm.faces.new([v1, v3, v4])
-                except ValueError:
-                    continue  # Skip if face creation fails
-    
-    def is_valid_quad(self, v1, v2, v3, v4):
-        """Check if four vertices form a valid quad"""
-        # Check for degenerate cases
-        if v1 == v2 or v2 == v3 or v3 == v4 or v4 == v1:
-            return False
-        
-        # Check if vertices are roughly coplanar
-        edge1 = v2.co - v1.co
-        edge2 = v3.co - v1.co
-        edge3 = v4.co - v1.co
-        
-        if edge1.length < 0.0001 or edge2.length < 0.0001 or edge3.length < 0.0001:
-            return False
-        
-        normal1 = edge1.cross(edge2).normalized()
-        normal2 = edge1.cross(edge3).normalized()
-        
-        # Check if normals are roughly aligned (coplanar)
-        return abs(normal1.dot(normal2)) > 0.8
-    
+        self.report({'INFO'}, f"Muscle mesh '{final_name}' generated successfully!")
+        return {'FINISHED'}
 
 
 class Muscle_Preview_Update_Op(bpy.types.Operator):
@@ -576,28 +273,32 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 self.finish_preview(context)
                 return {'FINISHED'}
             
-            # Only update on timer events to avoid excessive updates
-            if event.type != 'TIMER':
-                return {'PASS_THROUGH'}
-            
-            # Get muscle collection and objects
-            muscles_collection = bpy.data.collections.get("muscles")
-            if not muscles_collection or muscle_name not in muscles_collection.children:
-                self.finish_preview(context)
-                return {'FINISHED'}
-            
-            target_collection = muscles_collection.children[muscle_name]
-            curve_obj = target_collection.objects.get(muscle_name + "_curve")
-            
-            if not curve_obj:
-                return {'PASS_THROUGH'}
-            
-            # Check if curve has changed
-            current_curve_hash = self.get_curve_hash(curve_obj)
-            if current_curve_hash != self._last_curve_hash:
-                self._last_curve_hash = current_curve_hash
-                self.update_preview_mesh(context, muscle_name, target_collection)
-                context.area.tag_redraw()
+            # Update on timer events or when density properties change
+            if event.type == 'TIMER':
+                # Get muscle collection and objects
+                muscles_collection = bpy.data.collections.get("muscles")
+                if not muscles_collection or muscle_name not in muscles_collection.children:
+                    self.finish_preview(context)
+                    return {'FINISHED'}
+                
+                target_collection = muscles_collection.children[muscle_name]
+                curve_obj = target_collection.objects.get(muscle_name + "_curve")
+                
+                if not curve_obj:
+                    return {'PASS_THROUGH'}
+                
+                # Check if curve has changed or if we need to force update
+                current_curve_hash = self.get_curve_hash(curve_obj)
+                density_hash = self.get_density_hash(context)
+                
+                if (current_curve_hash != self._last_curve_hash or 
+                    not hasattr(self, '_last_density_hash') or 
+                    density_hash != self._last_density_hash):
+                    
+                    self._last_curve_hash = current_curve_hash
+                    self._last_density_hash = density_hash
+                    self.update_preview_mesh(context, muscle_name, target_collection)
+                    context.area.tag_redraw()
             
             return {'PASS_THROUGH'}
             
@@ -638,8 +339,8 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             self.report({'ERROR'}, "Failed to create preview mesh")
             return {'CANCELLED'}
         
-        # Add timer and modal handler with longer interval
-        self._timer = context.window_manager.event_timer_add(0.5, window=context.window)  # Reduced frequency
+        # Add timer and modal handler with shorter interval for responsiveness
+        self._timer = context.window_manager.event_timer_add(0.1, window=context.window)  # More responsive
         context.window_manager.modal_handler_add(self)
         
         self.report({'INFO'}, "Preview mode started - modify curve to see real-time updates")
@@ -655,8 +356,21 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             context.scene.muscle_preview_active = False
         
         # Keep the preview object but rename it to indicate it's static
-        if self._preview_object and self._preview_object.name in bpy.data.objects:
-            self._preview_object.name = self._preview_object.name.replace("_preview", "_preview_static")
+        try:
+            if self._preview_object and hasattr(self._preview_object, 'name'):
+                # Check if object still exists in Blender's data
+                object_exists = False
+                for obj in bpy.data.objects:
+                    if obj == self._preview_object:
+                        object_exists = True
+                        break
+                
+                if object_exists:
+                    self._preview_object.name = self._preview_object.name.replace("_preview", "_preview_static")
+        except ReferenceError:
+            # Object has been removed, ignore
+            pass
+        finally:
             self._preview_object = None
     
     def get_curve_hash(self, curve_obj):
@@ -687,6 +401,13 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         
         return hash_val
     
+    def get_density_hash(self, context):
+        """Create hash of density control values to detect changes"""
+        return hash((
+            context.scene.muscle_curve_subdivisions,
+            context.scene.muscle_contour_resolution
+        ))
+    
     def update_preview_mesh(self, context, muscle_name, target_collection):
         """Update the preview mesh based on current curve"""
         try:
@@ -700,8 +421,21 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 return False
             
             # Remove existing preview
-            if self._preview_object and self._preview_object.name in bpy.data.objects:
-                bpy.data.objects.remove(self._preview_object, do_unlink=True)
+            try:
+                if self._preview_object:
+                    # Check if object still exists
+                    object_exists = False
+                    for obj in bpy.data.objects:
+                        if obj == self._preview_object:
+                            object_exists = True
+                            break
+                    
+                    if object_exists:
+                        bpy.data.objects.remove(self._preview_object, do_unlink=True)
+            except ReferenceError:
+                # Object has been removed already, ignore
+                pass
+            finally:
                 self._preview_object = None
             
             # Create new preview mesh using simplified algorithm
@@ -730,15 +464,15 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return False
     
     def create_simple_preview_mesh(self, context, curve_obj, origin_contour, insertion_contour):
-        """Create preview mesh using simplified but working algorithm"""
+        """Create preview mesh using user-controlled density settings"""
         bm = bmesh.new()
         
         try:
-            # Get fewer sample points for preview performance
-            curve_points = self.get_curve_sample_points(curve_obj, 6)
+            # Use user-defined curve subdivisions for preview (reduced for performance)
+            curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))  # 60% for preview
+            curve_points = self.get_curve_sample_points(curve_obj, curve_subdivisions)
             
             if len(curve_points) < 2:
-                print("Not enough curve points")
                 return None
             
             # Get contour vertices
@@ -746,15 +480,14 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             insertion_loop = self.get_contour_vertices(insertion_contour)
             
             if not origin_loop or not insertion_loop:
-                print("Missing contour vertices")
                 return None
             
             # Calculate original centroids
             origin_centroid = sum(origin_loop, Vector()) / len(origin_loop)
             insertion_centroid = sum(insertion_loop, Vector()) / len(insertion_loop)
             
-            # Ensure same vertex count (simple resampling)
-            target_count = min(len(origin_loop), len(insertion_loop), 12)  # Limit for preview
+            # Use user-defined contour resolution (reduced for preview performance)
+            target_count = max(6, int(context.scene.muscle_contour_resolution * 0.75))  # 75% for preview
             origin_resampled = self.simple_resample(origin_loop, target_count)
             insertion_resampled = self.simple_resample(insertion_loop, target_count)
             
@@ -955,52 +688,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         obj.show_transparent = True
 
 
-class Muscle_Finalize_Op(bpy.types.Operator):
-    """Convert muscle to final mesh"""
-    bl_idname = "view3d.muscle_finalize"
-    bl_label = "Finalize Muscle"
-    bl_description = "Convert the procedural muscle to a final mesh object"
-    
-    def execute(self, context):
-        muscle_name = context.scene.muscle_Name
-        
-        # Get muscle collection
-        muscles_collection = bpy.data.collections.get("muscles")
-        if not muscles_collection or muscle_name not in muscles_collection.children:
-            self.report({'ERROR'}, f"Collection '{muscle_name}' not found")
-            return {'CANCELLED'}
-        
-        target_collection = muscles_collection.children[muscle_name]
-        muscle_obj = target_collection.objects.get(muscle_name + "_muscle")
-        
-        if not muscle_obj:
-            self.report({'ERROR'}, "Muscle object not found")
-            return {'CANCELLED'}
-        
-        # Switch to object mode
-        bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.ops.object.select_all(action='DESELECT')
-        
-        # Select muscle object
-        muscle_obj.select_set(True)
-        context.view_layer.objects.active = muscle_obj
-        
-        # Convert to mesh
-        bpy.ops.object.convert(target='MESH')
-        
-        # Clean up the mesh
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='EDGE')
-        bpy.ops.mesh.select_non_manifold()
-        if context.object.data.total_edge_sel > 0:
-            bpy.ops.mesh.edge_face_add()
-        
-        bpy.ops.object.mode_set(mode='OBJECT')
-        
-        self.report({'INFO'}, f"Muscle '{muscle_name}' finalized as mesh")
-        return {'FINISHED'}
-
-
 class Muscle_Preview_Stop_Op(bpy.types.Operator):
     """Stop the muscle preview mode"""
     bl_idname = "view3d.muscle_preview_stop"
@@ -1021,7 +708,11 @@ class Muscle_Preview_Stop_Op(bpy.types.Operator):
             preview_obj = target_collection.objects.get(muscle_name + "_preview")
             
             if preview_obj:
-                bpy.data.objects.remove(preview_obj, do_unlink=True)
+                try:
+                    bpy.data.objects.remove(preview_obj, do_unlink=True)
+                except ReferenceError:
+                    # Object already removed, ignore
+                    pass
         
         self.report({'INFO'}, "Preview stopped")
         return {'FINISHED'}

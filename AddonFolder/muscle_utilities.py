@@ -251,3 +251,16 @@ def update_insertion_rotation(self, context):
             print("Geometry Nodes modifier not found on muscle object")
 
     with_temp_object_active(context, muscle_obj, insertion_rot_action)
+
+def update_mesh_density(self, context):
+    """Update mesh density in real-time if preview is active"""
+    # Always trigger update during preview - no need for realtime_update toggle
+    if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
+        # Force immediate update by triggering redraw for all 3D viewports
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+        
+        # Also force scene update
+        context.view_layer.update()

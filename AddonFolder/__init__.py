@@ -18,12 +18,12 @@ from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
                             Submit_Insertion_Op, Next_Muscle_Op,
                             Calculate_Muscle_Parameters_Op)
 from .muscle_utilities import (update_muscle_subdivision, update_muscle_resampling,
-                             update_insertion_rotation, update_origin_rotation)
+                             update_insertion_rotation, update_origin_rotation,
+                             update_mesh_density)
 from .improved_muscle_workflow import (Muscle_Curve_Creation_Op, 
                                      Muscle_Mesh_Generation_Op,
                                      Muscle_Preview_Update_Op,
-                                     Muscle_Preview_Stop_Op,
-                                     Muscle_Finalize_Op)
+                                     Muscle_Preview_Stop_Op)
 from .myoGenerator_panel import MYOGENERATOR_PT_panel
 
 
@@ -43,7 +43,6 @@ def register():
     bpy.utils.register_class(Muscle_Mesh_Generation_Op)
     bpy.utils.register_class(Muscle_Preview_Update_Op)
     bpy.utils.register_class(Muscle_Preview_Stop_Op)
-    bpy.utils.register_class(Muscle_Finalize_Op)
 
 
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
@@ -121,6 +120,25 @@ def register():
         update= update_insertion_rotation
     )
 
+    # New mesh density control properties
+    bpy.types.Scene.muscle_curve_subdivisions = bpy.props.IntProperty(
+        name="Curve Subdivisions",
+        description="Number of subdivisions along the muscle curve",
+        default=12,
+        min=4,
+        max=50,
+        update=update_mesh_density
+    )
+
+    bpy.types.Scene.muscle_contour_resolution = bpy.props.IntProperty(
+        name="Contour Resolution", 
+        description="Resolution of the contour loops (vertex count)",
+        default=16,
+        min=6,
+        max=64,
+        update=update_mesh_density
+    )
+
 
 def unregister():
     bpy.utils.unregister_class(Muscle_Name_Submition)
@@ -137,7 +155,6 @@ def unregister():
     bpy.utils.unregister_class(Muscle_Mesh_Generation_Op)
     bpy.utils.unregister_class(Muscle_Preview_Update_Op)
     bpy.utils.unregister_class(Muscle_Preview_Stop_Op)
-    bpy.utils.unregister_class(Muscle_Finalize_Op)
 
 
     del bpy.types.Scene.muscle_Name
@@ -151,3 +168,5 @@ def unregister():
     del bpy.types.Scene.insertion_Name
     del bpy.types.Scene.origin_rotation
     del bpy.types.Scene.insertion_rotation
+    del bpy.types.Scene.muscle_curve_subdivisions
+    del bpy.types.Scene.muscle_contour_resolution
