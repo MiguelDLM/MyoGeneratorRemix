@@ -459,24 +459,58 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 if not curve_obj:
                     return {'PASS_THROUGH'}
                 
-                # Check if curve has changed or if we need to force update
+                # Check if curve structure or settings have changed
+                curve_structure_hash = self.get_curve_structure_hash(curve_obj)
                 current_curve_hash = self.get_curve_hash(curve_obj)
                 density_hash = self.get_density_hash(context)
                 
+                # Also check for point count changes (more responsive)
+                point_structure_changed = self.detect_bezier_point_changes(curve_obj)
+                
                 if (current_curve_hash != self._last_curve_hash or 
+                    curve_structure_hash != getattr(self, '_last_structure_hash', None) or
+                    point_structure_changed or
                     not hasattr(self, '_last_density_hash') or 
                     density_hash != self._last_density_hash):
                     
                     self._last_curve_hash = current_curve_hash
+                    self._last_structure_hash = curve_structure_hash
                     self._last_density_hash = density_hash
                     should_update = True
             
             # Also check for curve editing events that should trigger immediate updates
-            elif event.type in {'G', 'S', 'R', 'TAB', 'LEFTMOUSE', 'RIGHTMOUSE'} and event.value == 'RELEASE':
+            elif event.type in {'G', 'S', 'R', 'TAB', 'LEFTMOUSE', 'RIGHTMOUSE', 'E', 'X', 'DEL'} and event.value == 'RELEASE':
                 # Check if we're editing a curve object
                 if (context.active_object and context.active_object.type == 'CURVE' and 
                     context.active_object.name.endswith('_curve')):
                     should_update = True
+                    print("Curve editing event detected")
+            
+            # Special check for extrude operations (adding points)
+            elif event.type == 'E' and event.value == 'PRESS':
+                if (context.active_object and context.active_object.type == 'CURVE' and 
+                    context.active_object.name.endswith('_curve')):
+                    # Force update after short delay to catch new points
+                    self._force_update_next = True
+            
+            # Check for mode changes (entering/exiting edit mode)
+            elif event.type == 'TAB' and event.value == 'PRESS':
+                if (context.active_object and context.active_object.type == 'CURVE' and 
+                    context.active_object.name.endswith('_curve')):
+                    # Force update when entering/exiting edit mode
+                    self._force_update_next = True
+                    print("Tab pressed on curve - will force update")
+            
+            # Check for undo/redo operations
+            elif event.type == 'Z' and event.value == 'PRESS' and event.ctrl:
+                should_update = True
+                print("Undo/Redo detected")
+            
+            # Force update if flagged
+            if getattr(self, '_force_update_next', False):
+                should_update = True
+                self._force_update_next = False
+                print("Forced update after curve modification")
             
             if should_update:
                 muscles_collection = bpy.data.collections.get("muscles")
@@ -604,6 +638,55 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             context.scene.muscle_contour_resolution
         ))
     
+    def get_curve_structure_hash(self, curve_obj):
+        """Create hash of curve structure to detect changes in Bezier points"""
+        if not curve_obj or curve_obj.type != 'CURVE' or not curve_obj.data.splines:
+            return 0
+        
+        spline = curve_obj.data.splines[0]
+        if spline.type != 'BEZIER':
+            return 0
+        
+        # Create hash based on number of points and their positions/radii
+        hash_data = []
+        hash_data.append(len(spline.bezier_points))  # Number of points
+        
+        for point in spline.bezier_points:
+            # Include position and radius in hash
+            hash_data.extend([
+                round(point.co.x, 4), round(point.co.y, 4), round(point.co.z, 4),
+                round(point.radius, 4)
+            ])
+            # Include handle positions for completeness
+            hash_data.extend([
+                round(point.handle_left.x, 4), round(point.handle_left.y, 4), round(point.handle_left.z, 4),
+                round(point.handle_right.x, 4), round(point.handle_right.y, 4), round(point.handle_right.z, 4)
+            ])
+        
+        return hash(tuple(hash_data))
+    
+    def detect_bezier_point_changes(self, curve_obj):
+        """
+        Detect if Bezier points have been added or removed
+        Returns True if structure changed
+        """
+        if not curve_obj or curve_obj.type != 'CURVE' or not curve_obj.data.splines:
+            return False
+        
+        spline = curve_obj.data.splines[0]
+        if spline.type != 'BEZIER':
+            return False
+        
+        current_point_count = len(spline.bezier_points)
+        previous_count = getattr(self, '_last_bezier_point_count', current_point_count)
+        
+        if current_point_count != previous_count:
+            print(f"Bezier point count changed: {previous_count} -> {current_point_count}")
+            self._last_bezier_point_count = current_point_count
+            return True
+        
+        return False
+    
     def update_preview_mesh(self, context, muscle_name, target_collection):
         """Update the preview mesh based on current curve"""
         try:
@@ -635,6 +718,9 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 self._preview_object = None
             
             # Create new preview mesh using simplified algorithm
+            # Always reset the parallel transport frame to ensure consistency
+            reset_orientation_frame()
+            
             preview_mesh = self.create_simple_preview_mesh(
                 context, curve_obj, origin_contour, insertion_contour
             )
@@ -695,7 +781,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             # Generate mesh using parallel transport orientation
             vertex_loops = []
             
-            print(f"Creating {curve_subdivisions} subdivision loops with parallel transport...")
             
             for i in range(curve_subdivisions):
                 t = i / (curve_subdivisions - 1) if curve_subdivisions > 1 else 0.0
@@ -704,7 +789,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 tangent, normal, binormal, radius = calculate_consistent_orientation_frame(curve_obj, t)
                 position, _, _ = get_bezier_point_at_parameter(curve_obj, t)
                 
-                print(f"  Loop {i}: t={t:.3f}, curve_pos={position}, radius={radius:.3f}")
                 
                 # Create interpolated contour and move it to curve position
                 
@@ -739,8 +823,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                     loop_verts.append(vert)
                 
                 vertex_loops.append(loop_verts)
-            
-            print(f"Created {len(vertex_loops)} vertex loops with parallel transport")
             
             # Ensure bmesh is valid
             bm.verts.ensure_lookup_table()
