@@ -84,9 +84,9 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         else:
             row.operator("view3d.muscle_preview_update", text="Start Preview", icon='PLAY')
         
-        # Mesh Density Controls
+        # Mesh Quality Controls
         row = box.row()
-        row.label(text="Mesh Density Controls:", icon='MESH_ICOSPHERE')
+        row.label(text="Mesh Quality:", icon='MESH_ICOSPHERE')
         
         # Curve subdivisions
         row = box.row()
@@ -96,33 +96,9 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         row = box.row()
         row.prop(context.scene, "muscle_contour_resolution", text="Contour Resolution")
         
-        # Spline-based Diameter Control Section
+        # Info about automatic Bezier control
         row = box.row()
-        row.label(text="Spline Diameter Control:", icon='CURVE_DATA')
-        
-        # Enable spline diameter control toggle
-        row = box.row()
-        row.prop(context.scene, "muscle_use_spline_diameter", text="Use Curve Point Weights")
-        
-        # Show diameter controls only when enabled
-        if getattr(context.scene, 'muscle_use_spline_diameter', True):
-            # Diameter smoothing
-            row = box.row()
-            row.prop(context.scene, "muscle_diameter_smoothing", text="Diameter Smoothing")
-            row.enabled = context.scene.muscle_use_spline_diameter
-            
-            # Weight setting operator buttons
-            row = box.row()
-            col = row.column()
-            col.operator("view3d.muscle_set_curve_weights", text="Set Point Weights", icon='FORCE_CURVE')
-            col = row.column()
-            col.operator("view3d.muscle_set_default_curve_weights", text="Set Default Muscle Shape", icon='PRESET')
-            
-            # Info text
-            row = box.row()
-            row.label(text="Tip: Edit curve points in Edit Mode", icon='INFO')
-            row = box.row()
-            row.label(text="Select points and use 'Set Point Weights'", icon='INFO')
+        row.label(text="Tip: Use curve handles to control muscle shape", icon='INFO')
         
         # Generate final mesh
         row = box.row()

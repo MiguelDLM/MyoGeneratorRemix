@@ -9,6 +9,119 @@ from mathutils import Vector, Matrix
 import mathutils
 import math
 
+def get_bezier_point_at_parameter(curve_obj, t):
+    """
+    Get position and tangent from Bezier curve at parameter t using proper interpolation
+    This ensures we follow the actual curve path, not just control points
+    
+    Args:
+        curve_obj: Bezier curve object
+        t: Parameter along curve (0.0 to 1.0)
+    
+    Returns:
+        tuple: (position Vector, tangent Vector, radius float)
+    """
+    if not curve_obj or curve_obj.type != 'CURVE' or not curve_obj.data.splines:
+        return Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0
+    
+    spline = curve_obj.data.splines[0]
+    
+    if spline.type == 'BEZIER':
+        points = spline.bezier_points
+        if len(points) < 2:
+            return Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0
+        
+        # Find the segment and local parameter
+        segment_length = 1.0 / (len(points) - 1)
+        segment_index = min(int(t / segment_length), len(points) - 2)
+        local_t = (t - segment_index * segment_length) / segment_length if segment_length > 0 else 0.0
+        
+        # Get Bezier control points for this segment
+        p0 = points[segment_index].co
+        p1 = points[segment_index].handle_right
+        p2 = points[segment_index + 1].handle_left
+        p3 = points[segment_index + 1].co
+        
+        # Get radius values
+        r0 = points[segment_index].radius
+        r1 = points[segment_index + 1].radius
+        
+        # Cubic Bezier position interpolation
+        t_inv = 1.0 - local_t
+        t2 = local_t * local_t
+        t3 = t2 * local_t
+        t_inv2 = t_inv * t_inv
+        t_inv3 = t_inv2 * t_inv
+        
+        position = (t_inv3 * p0 + 
+                   3.0 * t_inv2 * local_t * p1 + 
+                   3.0 * t_inv * t2 * p2 + 
+                   t3 * p3)
+        
+        # Cubic Bezier tangent (derivative)
+        tangent = (3.0 * t_inv2 * (p1 - p0) + 
+                  6.0 * t_inv * local_t * (p2 - p1) + 
+                  3.0 * t2 * (p3 - p2))
+        
+        if tangent.length > 0:
+            tangent = tangent.normalized()
+        else:
+            tangent = (p3 - p0).normalized()
+        
+        # Interpolate radius
+        radius = r0 * (1.0 - local_t) + r1 * local_t
+        
+        return position, tangent, max(0.1, radius)
+    
+    return Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0
+    """
+    Get the tangent vector from Bezier curve at parameter t using handle information
+    This provides proper orientation control for lofting
+    
+    Args:
+        curve_obj: Bezier curve object
+        t: Parameter along curve (0.0 to 1.0)
+    
+    Returns:
+        Vector: Normalized tangent vector based on Bezier handles
+    """
+    if not curve_obj or curve_obj.type != 'CURVE' or not curve_obj.data.splines:
+        return Vector((1, 0, 0))
+    
+    spline = curve_obj.data.splines[0]
+    
+    if spline.type == 'BEZIER':
+        points = spline.bezier_points
+        if len(points) < 2:
+            return Vector((1, 0, 0))
+        
+        # Find the segment and local parameter
+        segment_length = 1.0 / (len(points) - 1)
+        segment_index = min(int(t / segment_length), len(points) - 2)
+        local_t = (t - segment_index * segment_length) / segment_length if segment_length > 0 else 0.0
+        
+        # Get Bezier control points for this segment
+        p0 = points[segment_index].co
+        p1 = points[segment_index].handle_right
+        p2 = points[segment_index + 1].handle_left
+        p3 = points[segment_index + 1].co
+        
+        # Calculate tangent using Bezier curve derivative
+        # Derivative of cubic Bezier: 3(1-t)²(P1-P0) + 6(1-t)t(P2-P1) + 3t²(P3-P2)
+        t_inv = 1.0 - local_t
+        
+        tangent = (3.0 * t_inv * t_inv * (p1 - p0) + 
+                  6.0 * t_inv * local_t * (p2 - p1) + 
+                  3.0 * local_t * local_t * (p3 - p2))
+        
+        if tangent.length > 0:
+            return tangent.normalized()
+        else:
+            # Fallback to simple direction
+            return (p3 - p0).normalized()
+    
+    return Vector((1, 0, 0))
+
 def get_spline_diameter_at_parameter(curve_obj, t):
     """
     Get diameter scale based on curve point radius at parameter t (optimized for Bezier)
@@ -67,77 +180,266 @@ def get_spline_diameter_at_parameter(curve_obj, t):
     
     return 1.0
 
+def calculate_consistent_orientation_frame(curve_obj, t):
+    """
+    Calculate consistent orientation frame using parallel transport
+    This prevents mesh inversion in sharp curves (>180°) by maintaining
+    consistent normal orientation throughout the entire curve
+    
+    Args:
+        curve_obj: Bezier curve object
+        t: Parameter along curve (0.0 to 1.0)
+    
+    Returns:
+        tuple: (tangent, normal, binormal, radius) vectors
+    """
+    # Get position and tangent from Bezier curve
+    position, tangent, radius = get_bezier_point_at_parameter(curve_obj, t)
+    
+    # Initialize parallel transport frame on first call
+    if not hasattr(calculate_consistent_orientation_frame, 'transport_frame'):
+        # Initialize reference frame - use most stable axis relative to tangent
+        world_up = Vector((0, 0, 1))
+        world_right = Vector((1, 0, 0))
+        world_forward = Vector((0, 1, 0))
+        
+        # Choose the axis most perpendicular to initial tangent
+        up_dot = abs(tangent.dot(world_up))
+        right_dot = abs(tangent.dot(world_right))
+        forward_dot = abs(tangent.dot(world_forward))
+        
+        if up_dot < right_dot and up_dot < forward_dot:
+            reference_axis = world_up
+        elif right_dot < forward_dot:
+            reference_axis = world_right
+        else:
+            reference_axis = world_forward
+        
+        # Project reference axis onto plane perpendicular to tangent
+        normal = reference_axis - reference_axis.dot(tangent) * tangent
+        if normal.length > 1e-6:
+            normal = normal.normalized()
+        else:
+            # Fallback if projection fails
+            if abs(tangent.z) < 0.9:
+                normal = Vector((0, 0, 1)) - Vector((0, 0, 1)).dot(tangent) * tangent
+            else:
+                normal = Vector((1, 0, 0)) - Vector((1, 0, 0)).dot(tangent) * tangent
+            normal = normal.normalized()
+        
+        binormal = tangent.cross(normal).normalized()
+        
+        # Store initial frame
+        calculate_consistent_orientation_frame.transport_frame = {
+            'normal': normal,
+            'binormal': binormal,
+            'prev_tangent': tangent
+        }
+    else:
+        # Apply parallel transport algorithm
+        frame = calculate_consistent_orientation_frame.transport_frame
+        prev_tangent = frame['prev_tangent']
+        prev_normal = frame['normal']
+        prev_binormal = frame['binormal']
+        
+        # Calculate parallel transport of the frame
+        normal, binormal = parallel_transport_frame(
+            prev_tangent, tangent, prev_normal, prev_binormal
+        )
+        
+        # Update stored frame
+        frame['normal'] = normal
+        frame['binormal'] = binormal
+        frame['prev_tangent'] = tangent
+    
+    return tangent, normal, binormal, radius
+
+
+def parallel_transport_frame(prev_tangent, curr_tangent, prev_normal, prev_binormal):
+    """
+    Parallel transport frame algorithm for maintaining consistent orientation
+    This prevents mesh inversion in sharp curves by using minimal rotation
+    
+    Args:
+        prev_tangent: Previous tangent vector
+        curr_tangent: Current tangent vector  
+        prev_normal: Previous normal vector
+        prev_binormal: Previous binormal vector
+    
+    Returns:
+        tuple: (normal, binormal) vectors transported to current position
+    """
+    # Calculate the rotation axis and angle between tangents
+    cross_product = prev_tangent.cross(curr_tangent)
+    dot_product = max(-1.0, min(1.0, prev_tangent.dot(curr_tangent)))  # Clamp to prevent numerical issues
+    
+    # Check if tangents are nearly parallel
+    if cross_product.length < 1e-6:
+        # Tangents are parallel, no rotation needed
+        return prev_normal, prev_binormal
+    
+    # Calculate rotation angle using atan2 for better numerical stability
+    angle = math.atan2(cross_product.length, dot_product)
+    
+    # Normalize rotation axis
+    rotation_axis = cross_product.normalized()
+    
+    # Create rotation matrix for parallel transport
+    rotation_matrix = Matrix.Rotation(angle, 3, rotation_axis)
+    
+    # Apply rotation to transport the frame
+    new_normal = (rotation_matrix @ prev_normal).normalized()
+    new_binormal = (rotation_matrix @ prev_binormal).normalized()
+    
+    # Ensure orthogonality (Gram-Schmidt process)
+    # Make sure normal is perpendicular to current tangent
+    new_normal = new_normal - new_normal.dot(curr_tangent) * curr_tangent
+    if new_normal.length > 1e-6:
+        new_normal = new_normal.normalized()
+    else:
+        # Fallback: regenerate normal from binormal
+        new_normal = new_binormal.cross(curr_tangent).normalized()
+    
+    # Recalculate binormal to ensure orthogonal frame
+    new_binormal = curr_tangent.cross(new_normal).normalized()
+    
+    return new_normal, new_binormal
+
+
+def reset_orientation_frame():
+    """
+    Reset the parallel transport frame state for new lofting operations
+    Call this before starting a new mesh generation to ensure clean frame state
+    """
+    if hasattr(calculate_consistent_orientation_frame, 'transport_frame'):
+        delattr(calculate_consistent_orientation_frame, 'transport_frame')
+
+
+def calculate_frenet_frame_from_bezier(curve_obj, t, smoothing=0.5):
+    # Get tangent from Bezier handles
+    tangent = get_bezier_tangent_at_parameter(curve_obj, t)
+    
+    # Calculate normal using minimal rotation frame
+    # This method prevents flipping in curved sections
+    if not hasattr(calculate_frenet_frame_from_bezier, 'reference_normal'):
+        # Initialize reference normal
+        up = Vector((0, 0, 1))
+        if abs(tangent.dot(up)) > 0.9:
+            up = Vector((1, 0, 0))
+        normal = (up - up.dot(tangent) * tangent).normalized()
+        calculate_frenet_frame_from_bezier.reference_normal = normal
+    else:
+        # Use previous normal as reference to maintain consistency
+        prev_normal = calculate_frenet_frame_from_bezier.reference_normal
+        
+        # Project previous normal onto plane perpendicular to tangent
+        normal = (prev_normal - prev_normal.dot(tangent) * tangent)
+        
+        if normal.length < 0.1:
+            # Fallback if normal becomes too small
+            up = Vector((0, 0, 1))
+            if abs(tangent.dot(up)) > 0.9:
+                up = Vector((1, 0, 0))
+            normal = (up - up.dot(tangent) * tangent).normalized()
+        else:
+            normal = normal.normalized()
+    
+    # Calculate binormal
+    binormal = tangent.cross(normal).normalized()
+    
+    # Apply smoothing to reduce sudden orientation changes
+    if smoothing > 0.0 and hasattr(calculate_frenet_frame_from_bezier, 'prev_frame'):
+        prev_tangent, prev_normal, prev_binormal = calculate_frenet_frame_from_bezier.prev_frame
+        
+        # Smooth interpolation
+        blend = smoothing * 0.3
+        normal = (normal * (1.0 - blend) + prev_normal * blend).normalized()
+        binormal = tangent.cross(normal).normalized()
+    
+    # Store for next iteration
+    calculate_frenet_frame_from_bezier.reference_normal = normal
+    calculate_frenet_frame_from_bezier.prev_frame = (tangent, normal, binormal)
+    
+    return tangent, normal, binormal
+
 def calculate_frenet_frame(curve_points, index, smoothing=0.5):
     """
-    Calculate Frenet frame (tangent, normal, binormal) at curve point
-    This provides proper orientation for lofting without twisting
+    Calculate Frenet frame for a point along a curve (fallback method)
     
     Args:
         curve_points: List of curve points
-        index: Current point index
-        smoothing: Smoothing factor for frame calculation
+        index: Index of current point
+        smoothing: Smoothing factor
     
     Returns:
-        tuple: (tangent, normal, binormal) vectors
+        tuple: (tangent, normal, binormal)
     """
     if len(curve_points) < 2:
         return Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
     
-    # Calculate tangent vector
+    # Calculate tangent
     if index == 0:
         tangent = (curve_points[1] - curve_points[0]).normalized()
     elif index == len(curve_points) - 1:
         tangent = (curve_points[-1] - curve_points[-2]).normalized()
     else:
-        # Use smoothed central difference
         forward_diff = curve_points[index + 1] - curve_points[index]
         backward_diff = curve_points[index] - curve_points[index - 1]
         tangent = (forward_diff + backward_diff).normalized()
     
-    # Calculate curvature vector for better normal calculation
-    if len(curve_points) >= 3:
-        if index == 0:
-            p0, p1, p2 = curve_points[0], curve_points[1], curve_points[2]
-        elif index == len(curve_points) - 1:
-            p0, p1, p2 = curve_points[-3], curve_points[-2], curve_points[-1]
-        else:
-            p0, p1, p2 = curve_points[index-1], curve_points[index], curve_points[index+1]
-        
-        # Calculate second derivative (curvature direction)
-        second_deriv = p2 - 2*p1 + p0
-        
-        if second_deriv.length > 1e-6:
-            # Use curvature direction as normal
-            normal_direction = second_deriv.normalized()
-            # Make sure it's perpendicular to tangent
-            normal = (normal_direction - normal_direction.dot(tangent) * tangent).normalized()
-        else:
-            # Fallback for straight sections
-            normal = get_fallback_normal(tangent)
-    else:
-        # Simple case for short curves
-        normal = get_fallback_normal(tangent)
+    # Calculate normal using up vector method
+    up = Vector((0, 0, 1))
+    if abs(tangent.dot(up)) > 0.9:
+        up = Vector((1, 0, 0))
+    normal = (up - up.dot(tangent) * tangent).normalized()
     
     # Calculate binormal
     binormal = tangent.cross(normal).normalized()
     
-    # Apply smoothing if requested
-    if smoothing > 0.0 and index > 0 and hasattr(calculate_frenet_frame, 'prev_normal'):
-        # Smooth normal transition to reduce twisting
-        prev_normal = calculate_frenet_frame.prev_normal
-        dot_product = normal.dot(prev_normal)
-        
-        # If normals are pointing in very different directions, apply smoothing
-        if dot_product < 0.5:
-            normal = (normal * (1.0 - smoothing) + prev_normal * smoothing).normalized()
-            binormal = tangent.cross(normal).normalized()
-    
-    # Store for next iteration
-    calculate_frenet_frame.prev_normal = normal
-    
     return tangent, normal, binormal
 
-def apply_spline_based_scaling(contour_vertices, center_point, diameter_scale, tangent, normal, binormal):
+def create_oriented_loop_like_bridge(contour_vertices, center_point, tangent, normal, binormal, radius_scale):
+    """
+    Create oriented loop similar to Blender's Bridge Edge Loops algorithm
+    This ensures consistent face orientation and proper scaling
+    
+    Args:
+        contour_vertices: Original contour vertices
+        center_point: Center point for this cross-section
+        tangent: Tangent vector along curve
+        normal: Normal vector (consistent orientation)
+        binormal: Binormal vector
+        radius_scale: Scale factor for radius
+    
+    Returns:
+        List of transformed vertices
+    """
+    if not contour_vertices or radius_scale <= 0:
+        return contour_vertices
+    
+    transformed_vertices = []
+    
+    # Calculate center of original contour
+    original_center = sum(contour_vertices, Vector()) / len(contour_vertices)
+    
+    for vertex in contour_vertices:
+        # Get vector from original center to vertex
+        local_offset = vertex - original_center
+        
+        # Project this offset onto the normal plane (remove tangent component)
+        tangent_component = local_offset.dot(tangent)
+        radial_offset = local_offset - tangent_component * tangent
+        
+        # Scale the radial component based on radius
+        scaled_radial = radial_offset * radius_scale
+        
+        # Transform to new coordinate system using the orientation frame
+        # This ensures the loop maintains proper orientation
+        new_position = center_point + scaled_radial
+        
+        transformed_vertices.append(new_position)
+    
+    return transformed_vertices
     """
     Apply spline-based diameter scaling to contour vertices
     
@@ -402,3 +704,8 @@ def debug_curve_weights(curve_obj):
             for i, point in enumerate(spline.points):
                 weight = point.co[3] if len(point.co) > 3 else 1.0
                 print(f"    Point {i}: pos={point.co[:3]}, weight={weight}")
+
+def get_bezier_tangent_at_parameter(curve_obj, t):
+    """Get tangent vector from Bezier curve at parameter t (compatibility function)"""
+    position, tangent, radius = get_bezier_point_at_parameter(curve_obj, t)
+    return tangent

@@ -104,7 +104,7 @@ def with_temp_object_active(context, obj, action):
 
 def update_mesh_density(self, context):
     """Update mesh density in real-time if preview is active"""
-    # Always trigger update during preview - no need for realtime_update toggle
+    # Trigger update during preview mode
     if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
         # Force immediate update by triggering redraw for all 3D viewports
         for window in context.window_manager.windows:
@@ -112,7 +112,7 @@ def update_mesh_density(self, context):
                 if area.type == 'VIEW_3D':
                     area.tag_redraw()
         
-        # Also force scene update
+        # Force scene update
         context.view_layer.update()
 
 
@@ -356,8 +356,8 @@ def reverse_contour_direction(contour_obj):
                 point.handle_left_type = data['handle_right_type']
                 point.handle_right_type = data['handle_left_type']
         
-        # Update the curve
-        contour_obj.data.update()
+        # Update the curve properly
+        contour_obj.data.update_tag()
         return True
         
     except Exception as e:

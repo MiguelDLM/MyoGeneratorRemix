@@ -23,6 +23,9 @@ except ImportError:
 
 from .lofting_utilities import (create_smooth_curve_between_points, 
                                auto_adjust_curve_handles)
+from .spline_lofting_utilities import (reset_orientation_frame, 
+                                     calculate_consistent_orientation_frame,
+                                     get_bezier_point_at_parameter)
 from .muscle_utilities import align_contour_directions
 
 class Muscle_Curve_Creation_Op(bpy.types.Operator):
@@ -598,9 +601,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         """Create hash of density control values to detect changes"""
         return hash((
             context.scene.muscle_curve_subdivisions,
-            context.scene.muscle_contour_resolution,
-            getattr(context.scene, 'muscle_use_spline_diameter', True),
-            getattr(context.scene, 'muscle_diameter_smoothing', 0.5)
+            context.scene.muscle_contour_resolution
         ))
     
     def update_preview_mesh(self, context, muscle_name, target_collection):
@@ -657,119 +658,101 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return False
     
     def create_simple_preview_mesh(self, context, curve_obj, origin_contour, insertion_contour):
-        """Create preview mesh using spline-based diameter control and proper orientation"""
+        """Create preview mesh using Bezier parallel transport for robust orientation"""
         bm = bmesh.new()
         
         try:
-            # Import spline utilities
-            from .spline_lofting_utilities import (get_spline_diameter_at_parameter, 
-                                                  calculate_frenet_frame,
-                                                  apply_spline_based_scaling,
-                                                  smooth_diameter_transitions)
+            print("Starting create_simple_preview_mesh with parallel transport...")
             
-            # Use user-defined curve subdivisions for preview (reduced for performance)
-            curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))  # 60% for preview
-            curve_points = self.get_curve_sample_points(curve_obj, curve_subdivisions)
-            
-            if len(curve_points) < 2:
-                return None
+            # Reset orientation frame for new mesh generation
+            reset_orientation_frame()
             
             # Get contour vertices
             origin_loop = self.get_contour_vertices(origin_contour)
             insertion_loop = self.get_contour_vertices(insertion_contour)
             
+            print(f"Origin loop: {len(origin_loop) if origin_loop else 0} vertices")
+            print(f"Insertion loop: {len(insertion_loop) if insertion_loop else 0} vertices")
+            
             if not origin_loop or not insertion_loop:
+                print("ERROR: Missing contour vertices")
                 return None
             
             # Calculate original centroids
             origin_centroid = sum(origin_loop, Vector()) / len(origin_loop)
             insertion_centroid = sum(insertion_loop, Vector()) / len(insertion_loop)
             
-            # Use user-defined contour resolution (reduced for preview performance)
-            target_count = max(6, int(context.scene.muscle_contour_resolution * 0.75))  # 75% for preview
+            # Use user-defined contour resolution
+            target_count = max(6, int(context.scene.muscle_contour_resolution * 0.75))
             origin_resampled = self.simple_resample(origin_loop, target_count)
             insertion_resampled = self.simple_resample(insertion_loop, target_count)
             
-            # Get spline diameter control settings
-            use_spline_diameter = getattr(context.scene, 'muscle_use_spline_diameter', True)
-            diameter_smoothing = getattr(context.scene, 'muscle_diameter_smoothing', 0.5)
+            print(f"Resampled to {target_count} vertices per loop")
             
-            # Calculate diameter scales for each point along the curve using spline data
-            diameter_scales = []
-            for i in range(len(curve_points)):
-                t = i / (len(curve_points) - 1) if len(curve_points) > 1 else 0.0
-                
-                if use_spline_diameter:
-                    # Get diameter from curve point weights/radius
-                    diameter_scale = get_spline_diameter_at_parameter(curve_obj, t)
-                else:
-                    diameter_scale = 1.0
-                
-                diameter_scales.append(diameter_scale)
+            # Get curve subdivisions
+            curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))
             
-            # Apply smoothing to diameter transitions
-            if diameter_smoothing > 0.0:
-                diameter_scales = smooth_diameter_transitions(diameter_scales, diameter_smoothing)
-            
-            # Create vertex loops along curve with spline-based diameter control and proper orientation
+            # Generate mesh using parallel transport orientation
             vertex_loops = []
             
-            # Reset frame calculation for consistent orientation
-            if hasattr(calculate_frenet_frame, 'prev_normal'):
-                delattr(calculate_frenet_frame, 'prev_normal')
+            print(f"Creating {curve_subdivisions} subdivision loops with parallel transport...")
             
-            for i, curve_point in enumerate(curve_points):
-                t = i / (len(curve_points) - 1) if len(curve_points) > 1 else 0.0
-                diameter_scale = diameter_scales[i]
+            for i in range(curve_subdivisions):
+                t = i / (curve_subdivisions - 1) if curve_subdivisions > 1 else 0.0
                 
-                # Calculate proper Frenet frame for orientation
-                tangent, normal, binormal = calculate_frenet_frame(curve_points, i, diameter_smoothing)
+                # Get orientation frame and position from Bezier curve using parallel transport
+                tangent, normal, binormal, radius = calculate_consistent_orientation_frame(curve_obj, t)
+                position, _, _ = get_bezier_point_at_parameter(curve_obj, t)
                 
-                # Calculate interpolated centroid position
-                interpolated_centroid = origin_centroid.lerp(insertion_centroid, t)
+                print(f"  Loop {i}: t={t:.3f}, pos={position}, radius={radius:.3f}")
                 
-                # Calculate offset from original line to curve point
-                original_line_point = origin_centroid.lerp(insertion_centroid, t)
-                curve_offset = curve_point - original_line_point
-                
-                # Final center position for this cross-section
-                section_center = interpolated_centroid + curve_offset
-                
-                # Create interpolated loop that follows the curve with spline-based scaling
+                # Create interpolated contour using proper orientation frame
                 interpolated_loop = []
                 for j in range(target_count):
+                    # Linear interpolation factor between origin and insertion
                     origin_vert = origin_resampled[j]
                     insertion_vert = insertion_resampled[j]
+                    base_pos = origin_vert.lerp(insertion_vert, t)
                     
-                    # Interpolate position
-                    interpolated_pos = origin_vert.lerp(insertion_vert, t)
+                    # Calculate the offset from the linear interpolation line
+                    linear_center = origin_centroid.lerp(insertion_centroid, t) 
+                    offset_from_linear = base_pos - linear_center
                     
-                    # Apply curve offset to make it follow the curve path
-                    curve_following_pos = interpolated_pos + curve_offset
+                    # Apply radius scaling to the offset
+                    scaled_offset = offset_from_linear * radius
                     
-                    interpolated_loop.append(curve_following_pos)
-                
-                # Apply spline-based scaling with proper orientation
-                if use_spline_diameter and diameter_scale != 1.0:
-                    scaled_loop = apply_spline_based_scaling(
-                        interpolated_loop, section_center, diameter_scale, 
-                        tangent, normal, binormal
-                    )
-                else:
-                    scaled_loop = interpolated_loop
+                    # Project the scaled offset onto the plane perpendicular to the curve
+                    # This ensures the cross-section follows the curve orientation
+                    tangent_component = scaled_offset.dot(tangent) * tangent
+                    perpendicular_offset = scaled_offset - tangent_component
+                    
+                    # Rotate the perpendicular offset to align with the curve's orientation frame
+                    # We'll use the original offset direction but ensure it's in the correct plane
+                    if perpendicular_offset.length > 1e-6:
+                        # The offset is already in the correct orientation, just ensure it's perpendicular
+                        final_offset = perpendicular_offset
+                    else:
+                        # Fallback: use normal direction
+                        final_offset = normal * 0.1  # Small offset in normal direction
+                    
+                    # Final position follows the curve with proper orientation
+                    final_pos = position + final_offset
+                    interpolated_loop.append(final_pos)
                 
                 # Add vertices to bmesh
                 loop_verts = []
-                for vert_co in scaled_loop:
+                for vert_co in interpolated_loop:
                     vert = bm.verts.new(vert_co)
                     loop_verts.append(vert)
                 
                 vertex_loops.append(loop_verts)
             
+            print(f"Created {len(vertex_loops)} vertex loops with parallel transport")
+            
             # Ensure bmesh is valid
             bm.verts.ensure_lookup_table()
             
-            # Bridge loops with simple quad creation
+            # Bridge loops with consistent winding order (like Bridge Edge Loops)
             for i in range(len(vertex_loops) - 1):
                 current_loop = vertex_loops[i]
                 next_loop = vertex_loops[i + 1]
@@ -778,18 +761,23 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                     for j in range(len(current_loop)):
                         j_next = (j + 1) % len(current_loop)
                         
+                        # Get vertices for quad - maintain consistent winding order
                         v1 = current_loop[j]
-                        v2 = current_loop[j_next]
+                        v2 = next_loop[j]
                         v3 = next_loop[j_next]
-                        v4 = next_loop[j]
+                        v4 = current_loop[j_next]
                         
                         try:
-                            bm.faces.new([v1, v2, v3, v4])
+                            # Create quad with consistent normal direction
+                            face = bm.faces.new([v1, v2, v3, v4])
+                            face.normal_update()
                         except ValueError:
-                            # Try triangles if quad fails
+                            # If quad fails, try triangles with consistent winding
                             try:
-                                bm.faces.new([v1, v2, v3])
-                                bm.faces.new([v1, v3, v4])
+                                face1 = bm.faces.new([v1, v2, v3])
+                                face2 = bm.faces.new([v1, v3, v4])
+                                face1.normal_update()
+                                face2.normal_update()
                             except ValueError:
                                 continue
             
@@ -993,176 +981,4 @@ class Muscle_Preview_Stop_Op(bpy.types.Operator):
                     pass
         
         self.report({'INFO'}, "Preview stopped")
-        return {'FINISHED'}
-
-
-class Muscle_Set_Curve_Weights_Op(bpy.types.Operator):
-    """Set weights on curve points for diameter control"""
-    bl_idname = "view3d.muscle_set_curve_weights"
-    bl_label = "Set Curve Point Weights"
-    bl_description = "Set weights on curve control points to control muscle diameter"
-    
-    weight_value: bpy.props.FloatProperty(
-        name="Weight",
-        description="Weight value for selected curve points (affects diameter)",
-        default=1.0,
-        min=0.1,
-        max=3.0,
-        precision=2,
-        step=0.1
-    )
-    
-    def execute(self, context):
-        # Get active object
-        if not context.active_object or context.active_object.type != 'CURVE':
-            self.report({'ERROR'}, "Please select a curve object and enter Edit mode")
-            return {'CANCELLED'}
-        
-        curve_obj = context.active_object
-        
-        if context.mode != 'EDIT_CURVE':
-            self.report({'ERROR'}, "Please enter Edit mode on the curve")
-            return {'CANCELLED'}
-        
-        # Get the curve data
-        spline_data = curve_obj.data.splines
-        if not spline_data:
-            self.report({'ERROR'}, "No splines found in curve")
-            return {'CANCELLED'}
-        
-        # Set weights on selected points
-        modified_points = 0
-        
-        for spline in spline_data:
-            if spline.type in ['NURBS', 'POLY']:
-                for point in spline.points:
-                    if point.select:
-                        # For NURBS points, the weight is the 4th component
-                        point.co = (point.co[0], point.co[1], point.co[2], self.weight_value)
-                        modified_points += 1
-            elif spline.type == 'BEZIER':
-                for point in spline.bezier_points:
-                    if point.select_control_point:
-                        # For Bezier points, use the radius property
-                        point.radius = self.weight_value
-                        modified_points += 1
-        
-        if modified_points > 0:
-            # Update the curve properly
-            curve_obj.data.update_tag()
-            
-            # Trigger preview update if active
-            if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
-                # Force immediate viewport update
-                for area in context.screen.areas:
-                    if area.type == 'VIEW_3D':
-                        area.tag_redraw()
-                
-                # Force scene and view layer update
-                context.view_layer.update()
-                
-                # Force depsgraph update to ensure changes are propagated
-                context.evaluated_depsgraph_get().update()
-            
-            self.report({'INFO'}, f"Set weight {self.weight_value:.2f} on {modified_points} curve points")
-        else:
-            self.report({'WARNING'}, "No curve points selected")
-        
-        return {'FINISHED'}
-    
-    def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self)
-
-
-class Muscle_Set_Default_Curve_Weights_Op(bpy.types.Operator):
-    """Set default muscle-like weights on all curve points"""
-    bl_idname = "view3d.muscle_set_default_curve_weights"
-    bl_label = "Set Default Muscle Weights"
-    bl_description = "Set default muscle-like radius values on all curve points (thicker in middle, tapered at ends)"
-    
-    def execute(self, context):
-        # Get active object
-        if not context.active_object or context.active_object.type != 'CURVE':
-            self.report({'ERROR'}, "Please select a curve object")
-            return {'CANCELLED'}
-        
-        curve_obj = context.active_object
-        
-        # Get the curve data
-        spline_data = curve_obj.data.splines
-        if not spline_data:
-            self.report({'ERROR'}, "No splines found in curve")
-            return {'CANCELLED'}
-        
-        # Set default muscle weights on all points
-        modified_points = 0
-        
-        for spline in spline_data:
-            if spline.type == 'BEZIER':
-                points = spline.bezier_points
-                num_points = len(points)
-                
-                if num_points < 2:
-                    continue
-                
-                for i, point in enumerate(points):
-                    # Calculate muscle-like radius based on position
-                    if i == 0 or i == num_points - 1:
-                        # End points - tapered for attachment
-                        point.radius = 0.8
-                    elif i == num_points // 2:
-                        # Middle point - thicker for muscle belly
-                        point.radius = 1.4
-                    else:
-                        # Transition points - gradual change
-                        distance_from_center = abs(i - num_points // 2)
-                        max_distance = num_points // 2
-                        # Linear interpolation from center (1.4) to ends (0.8)
-                        point.radius = 1.4 - (distance_from_center / max_distance) * 0.6
-                    
-                    modified_points += 1
-                    
-            elif spline.type in ['NURBS', 'POLY']:
-                points = spline.points
-                num_points = len(points)
-                
-                if num_points < 2:
-                    continue
-                
-                for i, point in enumerate(points):
-                    # Calculate muscle-like weight based on position
-                    if i == 0 or i == num_points - 1:
-                        # End points - tapered
-                        weight = 0.8
-                    elif i == num_points // 2:
-                        # Middle point - thicker
-                        weight = 1.4
-                    else:
-                        # Transition points
-                        distance_from_center = abs(i - num_points // 2)
-                        max_distance = num_points // 2
-                        weight = 1.4 - (distance_from_center / max_distance) * 0.6
-                    
-                    # For NURBS points, the weight is the 4th component
-                    point.co = (point.co[0], point.co[1], point.co[2], weight)
-                    modified_points += 1
-        
-        if modified_points > 0:
-            # Update the curve properly
-            curve_obj.data.update_tag()
-            
-            # Trigger preview update if active
-            if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
-                # Force immediate viewport update
-                for area in context.screen.areas:
-                    if area.type == 'VIEW_3D':
-                        area.tag_redraw()
-                
-                context.view_layer.update()
-                context.evaluated_depsgraph_get().update()
-            
-            self.report({'INFO'}, f"Set default muscle weights on {modified_points} curve points")
-        else:
-            self.report({'WARNING'}, "No curve points found")
-        
         return {'FINISHED'}
