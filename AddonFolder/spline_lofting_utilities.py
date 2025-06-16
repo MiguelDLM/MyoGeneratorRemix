@@ -206,43 +206,49 @@ def calculate_consistent_orientation_frame(curve_obj, t):
     
     # Initialize parallel transport frame on first call
     if not hasattr(calculate_consistent_orientation_frame, 'transport_frame'):
-        # Initialize reference frame - use most stable axis relative to tangent
-        world_up = Vector((0, 0, 1))
-        world_right = Vector((1, 0, 0))
-        world_forward = Vector((0, 1, 0))
+        # Initialize reference frame using most stable approach
+        # Find the axis most perpendicular to initial tangent for better stability
         
-        # Choose the axis most perpendicular to initial tangent
-        up_dot = abs(tangent.dot(world_up))
-        right_dot = abs(tangent.dot(world_right))
-        forward_dot = abs(tangent.dot(world_forward))
+        candidate_axes = [
+            Vector((1, 0, 0)),  # X axis
+            Vector((0, 1, 0)),  # Y axis  
+            Vector((0, 0, 1))   # Z axis
+        ]
         
-        if up_dot < right_dot and up_dot < forward_dot:
-            reference_axis = world_up
-        elif right_dot < forward_dot:
-            reference_axis = world_right
+        # Choose the axis most perpendicular to tangent
+        best_axis = None
+        min_dot = float('inf')
+        
+        for axis in candidate_axes:
+            dot_val = abs(tangent.dot(axis))
+            if dot_val < min_dot:
+                min_dot = dot_val
+                best_axis = axis
+        
+        # Create initial normal by projecting chosen axis onto plane perpendicular to tangent
+        initial_normal = best_axis - best_axis.dot(tangent) * tangent
+        if initial_normal.length > 1e-6:
+            initial_normal = initial_normal.normalized()
         else:
-            reference_axis = world_forward
-        
-        # Project reference axis onto plane perpendicular to tangent
-        normal = reference_axis - reference_axis.dot(tangent) * tangent
-        if normal.length > 1e-6:
-            normal = normal.normalized()
-        else:
-            # Fallback if projection fails
+            # Emergency fallback - create arbitrary perpendicular vector
             if abs(tangent.z) < 0.9:
-                normal = Vector((0, 0, 1)) - Vector((0, 0, 1)).dot(tangent) * tangent
+                initial_normal = Vector((0, 0, 1)) - Vector((0, 0, 1)).dot(tangent) * tangent
             else:
-                normal = Vector((1, 0, 0)) - Vector((1, 0, 0)).dot(tangent) * tangent
-            normal = normal.normalized()
+                initial_normal = Vector((1, 0, 0)) - Vector((1, 0, 0)).dot(tangent) * tangent
+            initial_normal = initial_normal.normalized()
         
-        binormal = tangent.cross(normal).normalized()
+        # Create initial binormal using right-handed coordinate system
+        initial_binormal = tangent.cross(initial_normal).normalized()
         
         # Store initial frame
         calculate_consistent_orientation_frame.transport_frame = {
-            'normal': normal,
-            'binormal': binormal,
+            'normal': initial_normal,
+            'binormal': initial_binormal,
             'prev_tangent': tangent
         }
+        
+        normal = initial_normal
+        binormal = initial_binormal
     else:
         # Apply parallel transport algorithm
         frame = calculate_consistent_orientation_frame.transport_frame
@@ -255,6 +261,11 @@ def calculate_consistent_orientation_frame(curve_obj, t):
             prev_tangent, tangent, prev_normal, prev_binormal
         )
         
+        # Verify frame consistency and correct any inversions
+        normal, binormal = verify_frame_consistency(
+            tangent, normal, binormal, prev_normal, prev_binormal
+        )
+        
         # Update stored frame
         frame['normal'] = normal
         frame['binormal'] = binormal
@@ -265,8 +276,8 @@ def calculate_consistent_orientation_frame(curve_obj, t):
 
 def parallel_transport_frame(prev_tangent, curr_tangent, prev_normal, prev_binormal):
     """
-    Parallel transport frame algorithm for maintaining consistent orientation
-    This prevents mesh inversion in sharp curves by using minimal rotation
+    Improved parallel transport using rotation minimizing frame (Bishop frame)
+    This method is more robust for sharp curves and prevents face inversion
     
     Args:
         prev_tangent: Previous tangent vector
@@ -277,39 +288,77 @@ def parallel_transport_frame(prev_tangent, curr_tangent, prev_normal, prev_binor
     Returns:
         tuple: (normal, binormal) vectors transported to current position
     """
-    # Calculate the rotation axis and angle between tangents
-    cross_product = prev_tangent.cross(curr_tangent)
-    dot_product = max(-1.0, min(1.0, prev_tangent.dot(curr_tangent)))  # Clamp to prevent numerical issues
+    # Normalize input vectors
+    prev_tangent = prev_tangent.normalized()
+    curr_tangent = curr_tangent.normalized()
+    prev_normal = prev_normal.normalized()
+    prev_binormal = prev_binormal.normalized()
     
-    # Check if tangents are nearly parallel
-    if cross_product.length < 1e-6:
-        # Tangents are parallel, no rotation needed
-        return prev_normal, prev_binormal
+    # Calculate reflection vector (Rodrigues' rotation formula approach)
+    # This is more stable than direct rotation matrix for large angles
     
-    # Calculate rotation angle using atan2 for better numerical stability
-    angle = math.atan2(cross_product.length, dot_product)
+    # Calculate the bisector direction for smooth transition
+    bisector = (prev_tangent + curr_tangent)
     
-    # Normalize rotation axis
-    rotation_axis = cross_product.normalized()
+    if bisector.length < 1e-6:
+        # Tangents are opposite, handle 180° case specially
+        # Find a perpendicular vector to use as reflection plane normal
+        if abs(prev_tangent.x) < 0.9:
+            reflection_normal = Vector((1, 0, 0))
+        else:
+            reflection_normal = Vector((0, 1, 0))
+        
+        # Make it perpendicular to the tangent
+        reflection_normal = reflection_normal - reflection_normal.dot(prev_tangent) * prev_tangent
+        reflection_normal = reflection_normal.normalized()
+        
+        # Reflect the frame vectors
+        new_normal = prev_normal - 2.0 * prev_normal.dot(reflection_normal) * reflection_normal
+        new_binormal = prev_binormal - 2.0 * prev_binormal.dot(reflection_normal) * reflection_normal
+        
+    else:
+        bisector = bisector.normalized()
+        
+        # Use reflection method for smoother transitions
+        # Reflect prev_normal in the plane perpendicular to bisector
+        dot_product = prev_normal.dot(bisector)
+        new_normal = prev_normal - 2.0 * dot_product * bisector
+        
+        # Reflect prev_binormal in the same plane
+        dot_product = prev_binormal.dot(bisector)
+        new_binormal = prev_binormal - 2.0 * dot_product * bisector
     
-    # Create rotation matrix for parallel transport
-    rotation_matrix = Matrix.Rotation(angle, 3, rotation_axis)
-    
-    # Apply rotation to transport the frame
-    new_normal = (rotation_matrix @ prev_normal).normalized()
-    new_binormal = (rotation_matrix @ prev_binormal).normalized()
-    
-    # Ensure orthogonality (Gram-Schmidt process)
-    # Make sure normal is perpendicular to current tangent
+    # Ensure the frame is orthogonal to current tangent using Gram-Schmidt
+    # Project out any component along the current tangent
     new_normal = new_normal - new_normal.dot(curr_tangent) * curr_tangent
+    new_binormal = new_binormal - new_binormal.dot(curr_tangent) * curr_tangent
+    
+    # Normalize the vectors
     if new_normal.length > 1e-6:
         new_normal = new_normal.normalized()
     else:
-        # Fallback: regenerate normal from binormal
-        new_normal = new_binormal.cross(curr_tangent).normalized()
+        # Emergency fallback: create new normal perpendicular to tangent
+        if abs(curr_tangent.z) < 0.9:
+            new_normal = Vector((0, 0, 1))
+        else:
+            new_normal = Vector((1, 0, 0))
+        new_normal = new_normal - new_normal.dot(curr_tangent) * curr_tangent
+        new_normal = new_normal.normalized()
     
-    # Recalculate binormal to ensure orthogonal frame
+    if new_binormal.length > 1e-6:
+        new_binormal = new_binormal.normalized()
+    else:
+        # Regenerate binormal as tangent × normal
+        new_binormal = curr_tangent.cross(new_normal).normalized()
+    
+    # Final orthogonalization: ensure normal ⊥ tangent and binormal = tangent × normal
+    new_normal = new_normal - new_normal.dot(curr_tangent) * curr_tangent
+    new_normal = new_normal.normalized()
     new_binormal = curr_tangent.cross(new_normal).normalized()
+    
+    # Verify the frame is right-handed
+    if new_binormal.dot(prev_binormal) < 0:
+        new_binormal = -new_binormal
     
     return new_normal, new_binormal
 
@@ -700,8 +749,6 @@ def debug_curve_weights(curve_obj):
         print("Invalid curve object")
         return
     
-    print(f"Debug curve weights for: {curve_obj.name}")
-    
     for spline_idx, spline in enumerate(curve_obj.data.splines):
         print(f"  Spline {spline_idx} (type: {spline.type}):")
         
@@ -718,4 +765,95 @@ def get_bezier_tangent_at_parameter(curve_obj, t):
     position, tangent, radius = get_bezier_point_at_parameter(curve_obj, t)
     return tangent
 
+def verify_frame_consistency(tangent, normal, binormal, prev_normal=None, prev_binormal=None):
+    """
+    Verify that the frame is consistent and correct any inversions
+    
+    Args:
+        tangent: Current tangent vector
+        normal: Current normal vector
+        binormal: Current binormal vector
+        prev_normal: Previous normal for consistency check
+        prev_binormal: Previous binormal for consistency check
+    
+    Returns:
+        tuple: (corrected_normal, corrected_binormal)
+    """
+    # Ensure orthogonality
+    normal = normal - normal.dot(tangent) * tangent
+    if normal.length > 1e-6:
+        normal = normal.normalized()
+    else:
+        # Regenerate normal if degenerate
+        if abs(tangent.z) < 0.9:
+            normal = Vector((0, 0, 1))
+        else:
+            normal = Vector((1, 0, 0))
+        normal = normal - normal.dot(tangent) * tangent
+        normal = normal.normalized()
+    
+    # Recalculate binormal to ensure right-handed system
+    binormal = tangent.cross(normal).normalized()
+    
+    # Check consistency with previous frame if available
+    if prev_normal is not None and prev_binormal is not None:
+        normal_consistency = normal.dot(prev_normal)
+        binormal_consistency = binormal.dot(prev_binormal)
+        
+        # If both have flipped, the frame has inverted
+        if normal_consistency < 0 and binormal_consistency < 0:
+            # Frame has flipped, correct it
+            normal = -normal
+            binormal = -binormal
+            print("Frame inversion detected and corrected")
+    
+    return normal, binormal
+
+def detect_global_inversions(curve_obj, num_samples=20):
+    """
+    Sample the curve at multiple points to detect global frame inversions
+    and determine if special handling is needed for the curve shape
+    
+    Args:
+        curve_obj: Bezier curve object
+        num_samples: Number of points to sample for analysis
+    
+    Returns:
+        bool: True if the curve needs special inversion handling
+    """
+    if not curve_obj or curve_obj.type != 'CURVE' or not curve_obj.data.splines:
+        return False
+    
+    # Reset frame state for clean sampling
+    reset_orientation_frame()
+    
+    # Sample tangent changes along the curve
+    total_rotation = 0.0
+    prev_tangent = None
+    
+    for i in range(num_samples):
+        t = i / (num_samples - 1) if num_samples > 1 else 0.0
+        
+        try:
+            tangent, _, _, _ = calculate_consistent_orientation_frame(curve_obj, t)
+            
+            if prev_tangent is not None:
+                # Calculate the rotation angle between consecutive tangents
+                dot_product = max(-1.0, min(1.0, prev_tangent.dot(tangent)))
+                angle = math.acos(abs(dot_product))
+                total_rotation += angle
+            
+            prev_tangent = tangent
+            
+        except Exception as e:
+            print(f"Error sampling curve at t={t}: {e}")
+            continue
+    
+    # Reset frame state after sampling
+    reset_orientation_frame()
+    
+    # If total rotation is very high, the curve may need special handling
+    threshold = math.pi * 1.5  # 270 degrees
+    needs_special_handling = total_rotation > threshold
+    
 

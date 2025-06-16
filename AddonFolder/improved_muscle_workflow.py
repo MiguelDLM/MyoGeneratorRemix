@@ -25,7 +25,8 @@ from .lofting_utilities import (create_smooth_curve_between_points,
                                auto_adjust_curve_handles)
 from .spline_lofting_utilities import (reset_orientation_frame, 
                                      calculate_consistent_orientation_frame,
-                                     get_bezier_point_at_parameter)
+                                     get_bezier_point_at_parameter,
+                                     detect_global_inversions)
 from .muscle_utilities import align_contour_directions
 
 class Muscle_Curve_Creation_Op(bpy.types.Operator):
@@ -484,7 +485,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 if (context.active_object and context.active_object.type == 'CURVE' and 
                     context.active_object.name.endswith('_curve')):
                     should_update = True
-                    print("Curve editing event detected")
             
             # Special check for extrude operations (adding points)
             elif event.type == 'E' and event.value == 'PRESS':
@@ -499,18 +499,18 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                     context.active_object.name.endswith('_curve')):
                     # Force update when entering/exiting edit mode
                     self._force_update_next = True
-                    print("Tab pressed on curve - will force update")
+
             
             # Check for undo/redo operations
             elif event.type == 'Z' and event.value == 'PRESS' and event.ctrl:
                 should_update = True
-                print("Undo/Redo detected")
+
             
             # Force update if flagged
             if getattr(self, '_force_update_next', False):
                 should_update = True
                 self._force_update_next = False
-                print("Forced update after curve modification")
+
             
             if should_update:
                 muscles_collection = bpy.data.collections.get("muscles")
@@ -681,7 +681,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         previous_count = getattr(self, '_last_bezier_point_count', current_point_count)
         
         if current_point_count != previous_count:
-            print(f"Bezier point count changed: {previous_count} -> {current_point_count}")
             self._last_bezier_point_count = current_point_count
             return True
         
@@ -717,9 +716,12 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             finally:
                 self._preview_object = None
             
-            # Create new preview mesh using simplified algorithm
+            # Create new preview mesh using improved parallel transport
             # Always reset the parallel transport frame to ensure consistency
             reset_orientation_frame()
+            
+            # Check if curve needs special handling for inversions
+            needs_special_handling = detect_global_inversions(curve_obj)
             
             preview_mesh = self.create_simple_preview_mesh(
                 context, curve_obj, origin_contour, insertion_contour
@@ -748,7 +750,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         bm = bmesh.new()
         
         try:
-            print("Starting create_simple_preview_mesh with parallel transport...")
             
             # Reset orientation frame for new mesh generation
             reset_orientation_frame()
@@ -756,10 +757,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             # Get contour vertices
             origin_loop = self.get_contour_vertices(origin_contour)
             insertion_loop = self.get_contour_vertices(insertion_contour)
-            
-            print(f"Origin loop: {len(origin_loop) if origin_loop else 0} vertices")
-            print(f"Insertion loop: {len(insertion_loop) if insertion_loop else 0} vertices")
-            
+                       
             if not origin_loop or not insertion_loop:
                 print("ERROR: Missing contour vertices")
                 return None
@@ -772,8 +770,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             target_count = max(6, int(context.scene.muscle_contour_resolution * 0.75))
             origin_resampled = self.simple_resample(origin_loop, target_count)
             insertion_resampled = self.simple_resample(insertion_loop, target_count)
-            
-            print(f"Resampled to {target_count} vertices per loop")
             
             # Get curve subdivisions
             curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))
