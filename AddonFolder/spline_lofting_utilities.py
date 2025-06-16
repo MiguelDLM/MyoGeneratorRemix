@@ -36,7 +36,7 @@ def get_bezier_point_at_parameter(curve_obj, t):
         segment_index = min(int(t / segment_length), len(points) - 2)
         local_t = (t - segment_index * segment_length) / segment_length if segment_length > 0 else 0.0
         
-        # Get Bezier control points for this segment
+        # Get Bezier control points for this segment (in local coordinates)
         p0 = points[segment_index].co
         p1 = points[segment_index].handle_right
         p2 = points[segment_index + 1].handle_left
@@ -46,32 +46,43 @@ def get_bezier_point_at_parameter(curve_obj, t):
         r0 = points[segment_index].radius
         r1 = points[segment_index + 1].radius
         
-        # Cubic Bezier position interpolation
+        # Cubic Bezier position interpolation (in local coordinates)
         t_inv = 1.0 - local_t
         t2 = local_t * local_t
         t3 = t2 * local_t
         t_inv2 = t_inv * t_inv
         t_inv3 = t_inv2 * t_inv
         
-        position = (t_inv3 * p0 + 
-                   3.0 * t_inv2 * local_t * p1 + 
-                   3.0 * t_inv * t2 * p2 + 
-                   t3 * p3)
+        local_position = (t_inv3 * p0 + 
+                         3.0 * t_inv2 * local_t * p1 + 
+                         3.0 * t_inv * t2 * p2 + 
+                         t3 * p3)
         
-        # Cubic Bezier tangent (derivative)
-        tangent = (3.0 * t_inv2 * (p1 - p0) + 
-                  6.0 * t_inv * local_t * (p2 - p1) + 
-                  3.0 * t2 * (p3 - p2))
+        # Transform from local curve coordinates to world coordinates
+        world_position = curve_obj.matrix_world @ local_position
         
-        if tangent.length > 0:
-            tangent = tangent.normalized()
+        print(f"      Bezier calc: local_pos={local_position}, world_pos={world_position}")
+        print(f"      Curve matrix: {curve_obj.matrix_world}")
+        
+        # Cubic Bezier tangent (derivative) in local coordinates
+        local_tangent = (3.0 * t_inv2 * (p1 - p0) + 
+                        6.0 * t_inv * local_t * (p2 - p1) + 
+                        3.0 * t2 * (p3 - p2))
+        
+        # Transform tangent to world coordinates (no translation, only rotation/scale)
+        world_tangent = curve_obj.matrix_world.to_3x3() @ local_tangent
+        
+        if world_tangent.length > 0:
+            world_tangent = world_tangent.normalized()
         else:
-            tangent = (p3 - p0).normalized()
+            # Fallback tangent
+            fallback_tangent = curve_obj.matrix_world.to_3x3() @ (p3 - p0)
+            world_tangent = fallback_tangent.normalized() if fallback_tangent.length > 0 else Vector((1, 0, 0))
         
         # Interpolate radius
         radius = r0 * (1.0 - local_t) + r1 * local_t
         
-        return position, tangent, max(0.1, radius)
+        return world_position, world_tangent, max(0.1, radius)
     
     return Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0
     """
@@ -195,6 +206,9 @@ def calculate_consistent_orientation_frame(curve_obj, t):
     """
     # Get position and tangent from Bezier curve
     position, tangent, radius = get_bezier_point_at_parameter(curve_obj, t)
+    
+    # Debug output for position verification
+    print(f"    Bezier point at t={t:.3f}: local calculation -> world position {position}")
     
     # Initialize parallel transport frame on first call
     if not hasattr(calculate_consistent_orientation_frame, 'transport_frame'):
@@ -709,3 +723,41 @@ def get_bezier_tangent_at_parameter(curve_obj, t):
     """Get tangent vector from Bezier curve at parameter t (compatibility function)"""
     position, tangent, radius = get_bezier_point_at_parameter(curve_obj, t)
     return tangent
+
+def get_bezier_point_blender_eval(curve_obj, t):
+    """
+    Alternative method using Blender's curve evaluation
+    This should give the correct world coordinates directly
+    """
+    if not curve_obj or curve_obj.type != 'CURVE':
+        return Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0
+    
+    try:
+        # Use Blender's built-in curve evaluation
+        # This automatically handles world coordinates
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        curve_eval = curve_obj.evaluated_get(depsgraph)
+        
+        # Get the curve data
+        curve_data = curve_eval.data
+        
+        if curve_data.splines:
+            spline = curve_data.splines[0]
+            
+            # Calculate the point along the curve
+            # For Bezier curves, we need to convert t to the curve's parameter space
+            resolution = curve_data.resolution_u
+            total_length = resolution * len(spline.bezier_points)
+            
+            # Sample point at parameter t
+            point_index = int(t * (total_length - 1))
+            point_index = max(0, min(point_index, total_length - 1))
+            
+            # This is a simplified approach - in practice, we'd need more complex evaluation
+            # For now, let's use the manual calculation but ensure it's in world space
+            
+    except Exception as e:
+        print(f"Blender evaluation failed: {e}")
+        
+    # Fallback to manual calculation
+    return get_bezier_point_at_parameter(curve_obj, t)

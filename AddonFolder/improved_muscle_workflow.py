@@ -662,7 +662,17 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         bm = bmesh.new()
         
         try:
-            print("Starting create_simple_preview_mesh with parallel transport...")
+            print(f"Starting create_simple_preview_mesh with parallel transport...")
+            print(f"Curve object: {curve_obj.name if curve_obj else 'None'}")
+            if curve_obj:
+                print(f"Curve location: {curve_obj.location}")
+                print(f"Curve matrix_world: {curve_obj.matrix_world}")
+                if curve_obj.data.splines:
+                    spline = curve_obj.data.splines[0]
+                    if spline.type == 'BEZIER' and spline.bezier_points:
+                        for i, point in enumerate(spline.bezier_points):
+                            world_pos = curve_obj.matrix_world @ point.co
+                            print(f"  Bezier point {i}: local={point.co}, world={world_pos}")
             
             # Reset orientation frame for new mesh generation
             reset_orientation_frame()
@@ -704,40 +714,41 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 tangent, normal, binormal, radius = calculate_consistent_orientation_frame(curve_obj, t)
                 position, _, _ = get_bezier_point_at_parameter(curve_obj, t)
                 
-                print(f"  Loop {i}: t={t:.3f}, pos={position}, radius={radius:.3f}")
+                print(f"  Loop {i}: t={t:.3f}, curve_pos={position}, radius={radius:.3f}")
+                print(f"    tangent={tangent}")
+                print(f"    normal={normal}")
+                print(f"    binormal={binormal}")
+                print(f"    origin_centroid={origin_centroid}")
+                print(f"    insertion_centroid={insertion_centroid}")
+                print(f"    linear_center_at_t={origin_centroid.lerp(insertion_centroid, t)}")
                 
-                # Create interpolated contour using proper orientation frame
-                interpolated_loop = []
+                # Create interpolated contour and move it to curve position
+                
+                # Linear interpolation between origin and insertion contours  
+                interpolated_contour = []
                 for j in range(target_count):
-                    # Linear interpolation factor between origin and insertion
                     origin_vert = origin_resampled[j]
                     insertion_vert = insertion_resampled[j]
-                    base_pos = origin_vert.lerp(insertion_vert, t)
+                    interpolated_vert = origin_vert.lerp(insertion_vert, t)
+                    interpolated_contour.append(interpolated_vert)
+                
+                # Calculate the center of the interpolated contour
+                interpolated_center = sum(interpolated_contour, Vector()) / len(interpolated_contour)
+                
+                # Create the final loop by moving each vertex from interpolated position to curve position
+                interpolated_loop = []
+                for vertex in interpolated_contour:
+                    # Get the offset from the interpolated center
+                    offset = vertex - interpolated_center
                     
-                    # Calculate the offset from the linear interpolation line
-                    linear_center = origin_centroid.lerp(insertion_centroid, t) 
-                    offset_from_linear = base_pos - linear_center
+                    # Apply radius scaling
+                    scaled_offset = offset * radius
                     
-                    # Apply radius scaling to the offset
-                    scaled_offset = offset_from_linear * radius
-                    
-                    # Project the scaled offset onto the plane perpendicular to the curve
-                    # This ensures the cross-section follows the curve orientation
-                    tangent_component = scaled_offset.dot(tangent) * tangent
-                    perpendicular_offset = scaled_offset - tangent_component
-                    
-                    # Rotate the perpendicular offset to align with the curve's orientation frame
-                    # We'll use the original offset direction but ensure it's in the correct plane
-                    if perpendicular_offset.length > 1e-6:
-                        # The offset is already in the correct orientation, just ensure it's perpendicular
-                        final_offset = perpendicular_offset
-                    else:
-                        # Fallback: use normal direction
-                        final_offset = normal * 0.1  # Small offset in normal direction
-                    
-                    # Final position follows the curve with proper orientation
-                    final_pos = position + final_offset
+                    # Place the vertex at the curve position with the scaled offset
+                    final_pos = position + scaled_offset
                     interpolated_loop.append(final_pos)
+                
+                print(f"    Moved contour from {interpolated_center} to {position}")
                 
                 # Add vertices to bmesh
                 loop_verts = []
@@ -952,6 +963,50 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             tangent = (curve_points[index + 1] - curve_points[index - 1]).normalized()
         
         return tangent
+    
+    def transform_contour_to_curve_frame(self, contour_vertices, curve_position, 
+                                       tangent, normal, binormal, radius_scale):
+        """
+        Transform contour vertices to curve coordinate system using parallel transport frame
+        
+        Args:
+            contour_vertices: List of vertex positions forming the contour
+            curve_position: Position on the curve
+            tangent, normal, binormal: Orthogonal frame vectors from parallel transport
+            radius_scale: Scale factor for the contour
+            
+        Returns:
+            List of transformed vertex positions
+        """
+        # Calculate contour centroid
+        contour_center = sum(contour_vertices, Vector()) / len(contour_vertices)
+        
+        print(f"    Transform: contour_center={contour_center}, curve_position={curve_position}")
+        print(f"    Distance between centers: {(curve_position - contour_center).length:.3f}")
+        
+        # Transform each vertex
+        transformed_vertices = []
+        
+        for vertex in contour_vertices:
+            # Get offset from contour center
+            local_offset = vertex - contour_center
+            
+            # Apply radius scaling
+            scaled_offset = local_offset * radius_scale
+            
+            # Simply move the scaled offset to the curve position
+            # The parallel transport frame ensures proper orientation is maintained
+            # without needing complex coordinate transformations
+            
+            # Remove any component along the curve tangent to keep it in the cross-section plane
+            tangent_component = scaled_offset.dot(tangent)
+            perpendicular_offset = scaled_offset - tangent_component * tangent
+            
+            # Final position: curve position + perpendicular offset
+            final_position = curve_position + perpendicular_offset
+            transformed_vertices.append(final_position)
+            
+        return transformed_vertices
 
 
 class Muscle_Preview_Stop_Op(bpy.types.Operator):
