@@ -401,7 +401,8 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
             import bmesh
             bm = bmesh.new()
             bm.from_mesh(mesh_obj.data)
-            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.2, repeat=2)
+            for _ in range(2):
+                bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.2)
             bm.to_mesh(mesh_obj.data)
             mesh_obj.data.update()
             bm.free()
@@ -416,7 +417,7 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         smoothing_iterations = max(1, int(getattr(context.scene, 'muscle_diameter_smoothing', 0.5) * 4))
         
         for _ in range(smoothing_iterations):
-            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.1, repeat=1)
+            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.1)
         
         # Update the mesh
         bm.to_mesh(mesh_obj.data)
@@ -526,7 +527,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return {'PASS_THROUGH'}
             
         except Exception as e:
-            print(f"Preview modal error: {e}")
+            self.report({'ERROR'}, f"Preview modal error: {e}")
             self.finish_preview(context)
             return {'FINISHED'}
     
@@ -695,7 +696,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             insertion_contour = target_collection.objects.get(muscle_name + "_insertion_contour")
             
             if not all([curve_obj, origin_contour, insertion_contour]):
-                print("Missing required objects for preview")
+                self.report({'ERROR'}, "Missing required objects for preview")
                 return False
             
             # Remove existing preview
@@ -740,7 +741,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return False
                 
         except Exception as e:
-            print(f"Error updating preview: {e}")
+            self.report({'ERROR'}, f"Error updating preview: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -748,7 +749,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
     def create_simple_preview_mesh(self, context, curve_obj, origin_contour, insertion_contour):
         """Create preview mesh using Bezier parallel transport for robust orientation"""
         bm = bmesh.new()
-        
+
         try:
             
             # Reset orientation frame for new mesh generation
@@ -759,7 +760,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             insertion_loop = self.get_contour_vertices(insertion_contour)
                        
             if not origin_loop or not insertion_loop:
-                print("ERROR: Missing contour vertices")
+                self.report({'ERROR'}, "Missing contour vertices")
                 return None
             
             # Calculate original centroids
@@ -780,35 +781,27 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             
             for i in range(curve_subdivisions):
                 t = i / (curve_subdivisions - 1) if curve_subdivisions > 1 else 0.0
-                
+
                 # Get orientation frame and position from Bezier curve using parallel transport
                 tangent, normal, binormal, radius = calculate_consistent_orientation_frame(curve_obj, t)
                 position, _, _ = get_bezier_point_at_parameter(curve_obj, t)
-                
-                
-                # Create interpolated contour and move it to curve position
-                
-                # Linear interpolation between origin and insertion contours  
+
+                # Linear interpolation between origin and insertion contours
                 interpolated_contour = []
                 for j in range(target_count):
                     origin_vert = origin_resampled[j]
                     insertion_vert = insertion_resampled[j]
                     interpolated_vert = origin_vert.lerp(insertion_vert, t)
                     interpolated_contour.append(interpolated_vert)
-                
-                # Calculate the center of the interpolated contour
+
+                # Calculate center of the interpolated contour
                 interpolated_center = sum(interpolated_contour, Vector()) / len(interpolated_contour)
-                
+
                 # Create the final loop by moving each vertex from interpolated position to curve position
                 interpolated_loop = []
                 for vertex in interpolated_contour:
-                    # Get the offset from the interpolated center
                     offset = vertex - interpolated_center
-                    
-                    # Apply radius scaling
                     scaled_offset = offset * radius
-                    
-                    # Place the vertex at the curve position with the scaled offset
                     final_pos = position + scaled_offset
                     interpolated_loop.append(final_pos)
                 
@@ -864,6 +857,11 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             
             # Clean up
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
+
+            # Apply light smoothing to soften the preview mesh
+            for _ in range(2):
+                bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.5)
+
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             
             # Create mesh
@@ -874,7 +872,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return mesh
             
         except Exception as e:
-            print(f"Error in create_simple_preview_mesh: {e}")
+            self.report({'ERROR'}, f"Error in create_simple_preview_mesh: {e}")
             import traceback
             traceback.print_exc()
             return None
