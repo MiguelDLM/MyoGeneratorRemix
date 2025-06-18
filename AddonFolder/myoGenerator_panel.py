@@ -83,6 +83,10 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
             row.operator("view3d.muscle_preview_stop", text="Stop Preview", icon='PAUSE')
         else:
             row.operator("view3d.muscle_preview_update", text="Start Preview", icon='PLAY')
+
+        # Lofting mode selection directly below preview button
+        row = box.row()
+        row.prop(context.scene, "muscle_lofting_mode", text="Lofting Mode")
         
         # Mesh Quality Controls
         row = box.row()
@@ -96,9 +100,6 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         row = box.row()
         row.prop(context.scene, "muscle_contour_resolution", text="Contour Resolution")
 
-        # Lofting mode selection
-        row = box.row()
-        row.prop(context.scene, "muscle_lofting_mode", text="Lofting Mode")
         
         # Info about automatic Bezier control
         row = box.row()

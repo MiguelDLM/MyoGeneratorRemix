@@ -401,7 +401,8 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
             import bmesh
             bm = bmesh.new()
             bm.from_mesh(mesh_obj.data)
-            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.2, repeat=2)
+            for _ in range(2):
+                bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.2)
             bm.to_mesh(mesh_obj.data)
             mesh_obj.data.update()
             bm.free()
@@ -416,7 +417,7 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         smoothing_iterations = max(1, int(getattr(context.scene, 'muscle_diameter_smoothing', 0.5) * 4))
         
         for _ in range(smoothing_iterations):
-            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.1, repeat=1)
+            bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.1)
         
         # Update the mesh
         bm.to_mesh(mesh_obj.data)
@@ -876,7 +877,8 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
 
             if mode == 'SMOOTH':
-                bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.5, repeat=3)
+                for _ in range(3):
+                    bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.5)
 
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             
