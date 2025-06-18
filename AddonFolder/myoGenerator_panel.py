@@ -89,6 +89,12 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         row = box.row()
         row.label(text="Tip: Scale handles to adjust thickness", icon='INFO')
         
+
+
+        # Tip about using handles for diameter control
+        row = box.row()
+        row.label(text="Tip: Scale handles to adjust thickness", icon='INFO')
+        
         # Mesh Quality Controls
         row = box.row()
         row.label(text="Mesh Quality:", icon='MESH_ICOSPHERE')
@@ -100,6 +106,16 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         # Contour resolution
         row = box.row()
         row.prop(context.scene, "muscle_contour_resolution", text="Contour Resolution")
+
+        # Vertex order offsets for contour alignment
+        row = box.row(align=True)
+        row.prop(context.scene, "origin_contour_offset", text="Origin Offset")
+        row.prop(context.scene, "insertion_contour_offset", text="Insertion Offset")
+
+        # Option to reverse contour orientation if needed
+        row = box.row(align=True)
+        row.prop(context.scene, "origin_reverse_orientation", text="Reverse Origin")
+        row.prop(context.scene, "insertion_reverse_orientation", text="Reverse Insertion")
 
         
         # Info about automatic Bezier control
