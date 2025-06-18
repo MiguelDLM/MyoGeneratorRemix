@@ -6,6 +6,7 @@ import bpy
 import bmesh
 from mathutils import Vector, Matrix
 from .muscle_utilities import with_temp_object_active
+from .muscle_texture import apply_muscle_material
 
 # Import lofting utilities with error handling
 try:
@@ -268,9 +269,12 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         # Rename preview to final muscle mesh
         preview_obj.name = final_name
         
-        # Remove preview material and apply default material
-        if preview_obj.data.materials:
-            preview_obj.data.materials.clear()
+        # Apply the procedural muscle material
+        material_applied = apply_muscle_material(preview_obj)
+        if material_applied:
+            self.report({'INFO'}, "Muscle material applied successfully")
+        else:
+            self.report({'WARNING'}, "Failed to apply muscle material")
         
         # Make sure it's visible (not transparent)
         preview_obj.show_transparent = False
