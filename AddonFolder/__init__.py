@@ -80,7 +80,7 @@ def register():
         description="Number of subdivisions along the muscle curve",
         default=12,
         min=4,
-        max=50,
+        max=100,
         update=update_mesh_density
     )
 
@@ -88,8 +88,8 @@ def register():
         name="Contour Resolution",
         description="Resolution of the contour loops (vertex count)",
         default=16,
-        min=6,
-        max=64,
+        min=4,
+        max=100,
         update=update_mesh_density
     )
 
