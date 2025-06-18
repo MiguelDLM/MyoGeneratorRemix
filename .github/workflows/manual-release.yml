@@ -40,9 +40,9 @@ jobs:
     - name: Create addon zip
       run: |
         cd AddonFolder
-        zip -r ../MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip . -x "*.pyc" "*/__pycache__/*" "*.git*"
+        zip -r ../MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip . -x "*.pyc" "__pycache__/*" ".git*" "*.log"
         cd ..
-        ls -la *.zip
+        ls -la MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip
 
     - name: Generate changelog
       id: changelog
