@@ -1,70 +1,148 @@
-#  MyoGeneratorRemix Blender Add-On
-Blender add-on to create volumetric muscles   
+# MyoGeneratorRemix - Blender Add-On
 
-MyogeneratorRemix is a re-imagination of the MyoGenerator add-on created by Eva C. Herbst and Niccolo Fioritti taking advantage of the new features of Blender and specially of the Geometry Nodes. This version of the add-on has been updated to work with Blender 4.3.2 and includes a number of new features, improvements, and bug fixes present in the original add-on.
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/MiguelDLM/MyoGeneratorRemix?style=flat-square)](https://github.com/MiguelDLM/MyoGeneratorRemix/releases/latest)
+[![GitHub all releases](https://img.shields.io/github/downloads/MiguelDLM/MyoGeneratorRemix/total?style=flat-square&color=brightgreen)](https://github.com/MiguelDLM/MyoGeneratorRemix/releases)
+[![Blender](https://img.shields.io/badge/Blender-4.4.3%2B-orange?style=flat-square&logo=blender)](https://www.blender.org/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](https://www.gnu.org/licenses/gpl-3.0)
 
-:pencil: Read the original paper from the Herbst et al. 2022 [paper](https://doi.org/10.1098/rsos.220519), wrote with Luke E. Meade, Stephan
-Lautenschlager, and Torsten M. Scheyer. If you use this method, please cite the original paper (Herbst et al. 2022) regarding the method. The Add-on  can be cited as:
+
+**Advanced Blender add-on for creating anatomically accurate volumetric muscle meshes using Bezier curve-based lofting**.
+
+MyoGeneratorRemix is a completely redesigned version of the original MyoGenerator add-on by Eva C. Herbst and Niccolo Fioritti. This remix takes full advantage of modern Blender features and implements a robust, automatic Bezier-based muscle lofting system that fix previous issues during the mesh generation and parameter calculation processes.
+
+## Key Features
+
+- **Automatic Bezier-Based Lofting**: Uses Bezier curve handles for orientation and radius data for local mesh thickness
+- **Smart Curve Detection**: Automatically detects changes in Bezier curve structure and regenerates mesh accordingly
+- **Streamlined Workflow**: Minimal user input required for muscle creation
+- **Comprehensive Metrics**: Exports detailed CSV files with muscle measurements and properties
+- **Procedural Muscle Materials**: Automatically applies realistic muscle textures with subsurface scattering
+
+![Menu Panel](menu.png)
+
+## Installation
+
+### Requirements
+- Developed and tested on Blender 4.4.3 ([Download Blender](https://www.blender.org/))
+
+### Installation Steps
+1. Download the latest release ZIP file from the [GitHub repository](https://github.com/MiguelDLM/MyoGeneratorRemix/releases)
+2. In Blender, go to **Edit > Preferences > Add-ons**
+3. Click **Install from disk** (right upper corner dropdown menu)and select the downloaded ZIP file or navigate to the `AddonFolder` directory
+4. Enable the add-on by checking the box next to "MyoGeneratorRemix"
+5. The add-on panel will appear in the 3D Viewport sidebar (press `N` to toggle sidebar)
+
+## Workflow
+
+### Initial Setup
+1. Start with a new Blender file
+2. Import your bone meshes (preferably cleaned models with no intersecting faces or non-manifold edges)
+3. Verify your model is at correct scale (Usually, anatomical models such as CT models are in millimeters but Blender uses meters as default unit, so you may assume that 1 Blender unit = 1 millimeter)
+4. Keep all objects visible during the muscle creation process
+
+### Creating Muscles
+
+#### 1. Data Setup
+- **Folder Path**: Choose where to save your muscle data and CSV files
+- **File Name**: Set the base name for your output files
+- **Muscle Name**: Enter a unique name for each muscle
+
+#### 2. Origin Creation
+- **Select Origin Bone**: Choose the bone where the muscle originates
+- **Start Origin Selection**: Enter face selection mode
+- **Select Attachment Area**: Use lasso tool to select the muscle attachment faces
+- **Submit Origin**: Confirm your selection
+
+#### 3. Insertion Creation
+- **Select Insertion Bone**: Choose the bone where the muscle inserts
+- **Start Insertion Selection**: Enter face selection mode  
+- **Select Attachment Area**: Select the muscle insertion faces
+- **Submit Insertion**: Confirm your selection
+
+#### 4. Curve and Mesh Generation
+- **Create Muscle Curve**: Generates a Bezier curve between origin and insertion centroids
+- **Adjust Curve**: Modify the curve shape, handles, and radius as needed. You can add or remove points to refine the muscle path at this stage.
+- **Preview Muscle**: Generate a preview mesh to see the results and refine the curve if necessary
+- **Curve subdivision**: Adjust the curve resolution for smoother mesh generation
+- **Contour resolution**: Set the number of contour points for each attachment area
+- **Origin/Insertion Offset**: Displace the vertices order for a better conection between the origin and insertion areas
+- **Reverse origin/insertion**: Optionally reverse the origin and insertion order of the vertices for a better connection
+
+- **Generate Final Mesh**: Create the final muscle mesh with automatic material application
+- **Repeat for Additional Muscles**: Use the same workflow to create more muscles as needed
+
+#### 5. Finalization
+- **Calculate and export Parameters**: Compute muscle metrics (volume, length, attachment areas, etc.) and export them to CSV files
+
+
+### Advanced Features
+
+#### Bezier Curve Controls
+- **Handle Manipulation**: Adjust curve handles to control muscle path and orientation
+- **Radius Adjustment**: Modify point radius to control local muscle thickness
+- **Automatic Updates**: Mesh automatically regenerates when curve structure changes
+
+#### Material System
+- **Procedural Textures**: Automatic application of realistic muscle materials
+- **Subsurface Scattering**: Proper light transmission for organic appearance
+- **Fiber Patterns**: Voronoi and noise-based texture patterns simulate muscle fibers
+
+## Output Files
+
+The add-on generates:
+- **Muscle Mesh**: High-quality volumetric muscle geometry
+- **CSV Metrics**: Comprehensive measurements including:
+  - Muscle volume and surface area
+  - Origin and insertion areas
+  - Centroid coordinates
+  - Linear distance (Euclidean distance between centroids)
+  - Fiber length (actual muscle path length)
+  - Physiological Cross-Sectional Area (average area along the muscle path)
+  - Muscle Force (calculated based on PCSA multiplied by a constant factor, e.g., 0.3 N/mm²)
+
+## Organization
+
+All muscle components are automatically organized in Blender collections:
+- **Muscles Collection**: Contains all muscle sub collections and objects
+- **Muscle Names Collection**: Contains individual muscle objects named according to the specified muscle name
+
+
+## Tips for Best Results
+
+1. **Clean Geometry**: Ensure bone meshes are manifold with no intersecting faces
+2. **Continuous Selection**: Select continuous attachment areas without gaps
+3. **Proper Scale**: Verify your model is at correct anatomical scale
+4. **Curve Refinement**: Adjust Bezier handles and radius for optimal muscle shape
+5. **Iterative Workflow**: Use preview function to refine before final generation
+
+## Citation
+
+If you use this method in your research, please cite the original paper:
 
 ```
-Díaz de León-Muñoz, E. M. (2025). MyoGeneratorRemix: A Blender Add-On for Creating Volumetric Muscles [Computer software]. Retrieved from
-[Github](https://github.com/MiguelDLM/MyoGeneratorRemix).
+Herbst, E. C., Meade, L. E., Lautenschlager, S., & Scheyer, T. M. (2022). 
+A toolbox for the retrodeformation and muscle reconstruction of fossil specimens in Blender. 
+Royal Society Open Science, 9(12), 220519. https://doi.org/10.1098/rsos.220519
 ```
 
+For this remix version:
+```
+Díaz de León-Muñoz, E. M. (2025). MyoGeneratorRemix: A Blender Add-On for Creating Volumetric Muscles 
+[Computer software]. Retrieved from https://github.com/MiguelDLM/MyoGeneratorRemix
+```
 
-## Note about Alfa Release 0.1
+## Technical Details
 
-The curve is not being configured correctly in the Geometry Nodes, for this reason, the user must configure the curve manually by selecting the *muscle object* and going to *Modifiers* in the *Properties Panel* and selecting the *Curve* option in the *Geometry Nodes* modifier. The Curve is already there, the user only needs to select it and press *Enter*.
+This version implements several advanced computational geometry techniques:
+- **Parallel Transport Frames**: Bishop frame algorithm for consistent mesh orientation
+- **Bezier Sampling**: High-quality curve discretization for smooth muscle paths
+- **Automatic Material Nodes**: Procedural shader networks for realistic muscle appearance
+- **Dynamic Mesh Updates**: Real-time mesh regeneration based on curve modifications
 
-![Curve Fix](https://github.com/MiguelDLM/MyoGeneratorRemix/blob/main/curve-fix.png)
-## 
+## License
 
-## Output of Add-On
-- muscle volume mesh, origin area, insertion area, origin boundary loop, insertion boundary loop
-- .csv file with all of the muscle metrics (name, origin area, insertion area, origin centroid, insertion centroid, linear length, muscle length, muscle volume). Linear length is calculated as the Euclidean distance between origin and insertion centroids, muscle length is calculated as the length of the curve of the Blender muscle (sum of edge lengths constituting the curve). Headers are included, and multiple muscles are written to the same file as rows.
-- The add-on automatically organizes your muscle components (attachment areas and volume) inside collections
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
+## Acknowledgments
 
-## Notes for User
-- Start with a new Blender file, and import your bone meshes.
-- Do not rename the collections. The default Blender collection is named "Collection" and the muscle hierarchies will be created as part of this collection. The bone meshes you import should also automatically be part of this collection.
-- Ensure bone meshes are clean (manifold, no intersecting edges and faces) and of suitably high resolution to be able to select attachment areas with the desired precision
-
-- Ensure that the model in your scene is at the correct scale (i.e. if you took a measurement tool, the resulting dimensions would be correct). This is necessary because the add-on will apply scaling to the muscle areas etc, in other words it assumes the geometry as visible in the scene is the correct dimension. At the beginning of the add-on, the scale, rotation, and location of all objects is applied (setting scale = 1, and rotations and locations = to 0).
-- Make sure a continuous area is selected for your muscle attachments (no accidental unselected faces in the general attachment area, no faces only connected to other faces by single vertex)
-- For attachment select, we recommend using the lasso tool, which can be accessed by left clicking on the select box and selecting the lasso tool
-- All objects must be visible for the muscle volume updating to work!
-
-
-## Summary of Add-on Steps
-
-![AddOn](https://github.com/MiguelDLM/MyoGeneratorRemix/blob/main/Myogenerator_Addon_Fig_lowres.png)
-
-1. User enters folder and file name for saving data.
-2. User enters muscle name
-3. Code creates empty with that muscle name
-4. User selects bone on which muscle originates
-5. Bone becomes active object, code switches to edit mode
-6. User draws on muscle origin by selecting faces, submits 
-7. Code duplicates these faces, separates from bone to create new object representing attachment area, renames this object as “[muscle name] origin”. Then, code convert the mesh into curves
-8. Repeat steps 4-6 for insertion
-9. Curve is created by making a nurbs path between the centroids of the origin and insertion attachment sites. A Geometry Nodes modifier is added to the curve to create a tube volume. This GN modifier creates a loft transition between the origin and insertion surfaces along the curve.
-10. Since usually the origin and insertion boundaries are not equal in size and number of vertices, the connection can be not as expected, for this reason, the following options can be used to fix this:
-  -Rotate the vertex of the origin and insertion boundary loops to correctly link them without twisted geometry
-  -Swap the origin and insertion boundary (only if the origin and insertion are placed in the wrong order)
-  -Switch the direction of the vertices. Sometimes the vertices for one object are clockwise and for the other object are counterclockwise. The conections work by connecting the vertices in the same order, so if the vertices are not connected correctly, the user can switch the direction of the vertices of one of the objects.
-
-11. The user can define the mesh resolution by adjusting the number of subdivisions and resampling.
-12. Code converts curve to mesh
-13. Code resets add-on so that user can create new muscle.
-14. User can adjust muscle meshes iteratively - e.g., once a second muscle is made, the first muscle belly can be scaled to meet the second muscle, etc.
-25. Code calculates volumes of all muscles in the muscles collection, adds metric to .csv file. Volumes can be updated at any point. If you change a muscle (e.g. scale the muscle belly etc), click "calculate muscle parameters" to update the csv file.
-
-
- 
-## Add-on Installation
- 
- The add-on currently works for versions 4.2 Blender and above which can be installed [here](https://www.blender.org/).
- 
- To install the add-on, download this repository, extract all, zip the Add-on folder, and then follow the instructions [here](https://docs.blender.org/manual/en/latest/editors/preferences/addons.html), selecting the zipped Add-on Folder
- 
+Based on the original MyoGenerator by Eva C. Herbst and Niccolo Fioritti. 

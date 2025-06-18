@@ -1,0 +1,84 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 2.0.0, 2.1.0-beta)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  manual-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Update version in manifest
+      run: |
+        sed -i 's/version = ".*"/version = "${{ github.event.inputs.version }}"/' AddonFolder/blender_manifest.toml
+        echo "Updated version to ${{ github.event.inputs.version }}"
+        grep -E '^version\s*=' AddonFolder/blender_manifest.toml
+
+    - name: Commit version update
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add AddonFolder/blender_manifest.toml
+        git commit -m "Update version to ${{ github.event.inputs.version }}" || exit 0
+        git push
+
+    - name: Create addon zip
+      run: |
+        cd AddonFolder
+        zip -r ../MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip . -x "*.pyc" "*/__pycache__/*" "*.git*"
+        cd ..
+        ls -la *.zip
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get the latest tag
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        
+        if [ -z "$LATEST_TAG" ]; then
+          # If no previous tags, get all commits
+          CHANGELOG=$(git log --pretty=format:"- %s" --reverse)
+        else
+          # Get commits since last tag
+          CHANGELOG=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s" --reverse)
+        fi
+        
+        # Create changelog file
+        cat > CHANGELOG.md << EOF
+        ## What's Changed in v${{ github.event.inputs.version }}
+        
+        ${CHANGELOG}
+        
+        **Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ github.event.inputs.version }}
+        EOF
+        
+        echo "Generated changelog:"
+        cat CHANGELOG.md
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.event.inputs.version }}
+        name: MyoGeneratorRemix v${{ github.event.inputs.version }}
+        body_path: CHANGELOG.md
+        files: |
+          MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip
+        draft: false
+        prerelease: ${{ github.event.inputs.prerelease }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,11 +2,12 @@ import bpy
 
 class MYOGENERATOR_PT_panel(bpy.types.Panel):
     bl_idname = "MYOGENERATOR_PT_panel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
     bl_label = "MyoGeneratorRemix"
     bl_category = "MyoGeneratorRemix"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-
+    bl_options = {'DEFAULT_CLOSED'}
+    
     def draw(self, context):
         layout = self.layout
 
@@ -65,36 +66,54 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
 
         layout.separator()
 
+        # Muscle Creation Workflow - simplified single section
         box = layout.box()
-        box.label(text="Muscle Creation")
+        box.label(text="Muscle Creation", icon='CURVE_BEZCURVE')
+        
+        # Create muscle path
         row = box.row()
-        row.operator("view3d.muscle_creation",text="Create muscle")
+        row.operator("view3d.muscle_curve_creation", text="Create Muscle Path", icon='CURVE_PATH')
+        
+        row = box.row()
+        row.label(text="Manual curve adjustment in Edit Mode")
+        
+        # Preview controls
+        row = box.row()
+        if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
+            row.operator("view3d.muscle_preview_stop", text="Stop Preview", icon='PAUSE')
+        else:
+            row.operator("view3d.muscle_preview_update", text="Start Preview", icon='PLAY')
+        
+        # Mesh Quality Controls
+        row = box.row()
+        row.label(text="Mesh Quality:", icon='MESH_ICOSPHERE')
+        
+        # Curve subdivisions
+        row = box.row()
+        row.prop(context.scene, "muscle_curve_subdivisions", text="Curve Subdivisions")
+        
+        # Contour resolution
+        row = box.row()
+        row.prop(context.scene, "muscle_contour_resolution", text="Contour Resolution")
 
-        row = box.row()
-        # add an input field for the number subvisions
-        row.prop(context.scene, "muscle_subdivisions", text="Subdivisions")
+        # Vertex order offsets for contour alignment
+        row = box.row(align=True)
+        row.prop(context.scene, "origin_contour_offset", text="Origin Offset")
+        row.prop(context.scene, "insertion_contour_offset", text="Insertion Offset")
 
-        row = box.row()
-        #add resampling number  
-        row.prop(context.scene, "muscle_resampling", text="Resampling")
+        # Option to reverse contour orientation if needed
+        row = box.row(align=True)
+        row.prop(context.scene, "origin_reverse_orientation", text="Reverse Origin")
+        row.prop(context.scene, "insertion_reverse_orientation", text="Reverse Insertion")
 
+        
+        # Info about automatic Bezier control
         row = box.row()
-        row.prop(context.scene, "origin_rotation", text="Origin vertex rotation")
-
+        row.label(text="Tip: Use curve handles to control muscle shape", icon='INFO')
+        
+        # Generate final mesh
         row = box.row()
-        row.prop(context.scene, "insertion_rotation", text="Insertion vertex rotation")
-
-        row = box.row()
-        row.operator("view3d.swap_origin_insertion", text="Swap Origin and Insertion")
-
-        row = box.row()
-        row.operator("view3d.switch_vertex_order_origin", text="Switch Origin Vertex Order")
-
-        row = box.row()
-        row.operator("view3d.switch_vertex_order_insertion", text="Switch Insertion Vertex Order")
-
-        row = box.row()
-        row.operator("view3d.muscle_volume_creator", text="Create Muscle volume")
+        row.operator("view3d.muscle_mesh_generation", text="Generate Final Mesh", icon='MESH_CUBE')
 
         layout.separator()
         
@@ -102,5 +121,11 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         box.label(text="Finish")
         row = box.row()
         row.operator("view3d.next_muscle", text="Next Muscle")
+        
+        layout.separator()
+        
+        row = box.row()
+        row.prop(context.scene, "muscle_constant", text="Muscle Constant (N/cm²)", icon='FORCE_FORCE')
+        
         row = box.row()
         row.operator("view3d.calculate_muscle_parameters", text="Calculate Muscle Parameters")

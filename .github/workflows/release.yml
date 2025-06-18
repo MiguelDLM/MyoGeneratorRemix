@@ -1,0 +1,96 @@
+name: Create Release
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '*.md'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.message, '[release]') || contains(github.event.head_commit.message, '[RELEASE]')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get version from manifest
+      id: get_version
+      run: |
+        VERSION=$(grep -E '^version\s*=' AddonFolder/blender_manifest.toml | sed 's/.*=\s*"\([^"]*\)".*/\1/')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Found version: $VERSION"
+
+    - name: Check if release exists
+      id: check_release
+      run: |
+        if gh release view "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "Release v${{ steps.get_version.outputs.version }} already exists"
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "Release v${{ steps.get_version.outputs.version }} does not exist"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create addon zip
+      if: steps.check_release.outputs.exists == 'false'
+      run: |
+        cd AddonFolder
+        zip -r ../MyoGeneratorRemix-v${{ steps.get_version.outputs.version }}.zip . -x "*.pyc" "*/__pycache__/*" "*.git*"
+        cd ..
+        ls -la *.zip
+
+    - name: Generate changelog
+      if: steps.check_release.outputs.exists == 'false'
+      id: changelog
+      run: |
+        # Get the latest tag
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        
+        if [ -z "$LATEST_TAG" ]; then
+          # If no previous tags, get all commits
+          CHANGELOG=$(git log --pretty=format:"- %s" --reverse)
+        else
+          # Get commits since last tag
+          CHANGELOG=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s" --reverse)
+        fi
+        
+        # Create changelog file
+        cat > CHANGELOG.md << EOF
+        ## What's Changed
+        
+        ${CHANGELOG}
+        
+        **Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.get_version.outputs.version }}
+        EOF
+        
+        echo "Generated changelog:"
+        cat CHANGELOG.md
+
+    - name: Create Release
+      if: steps.check_release.outputs.exists == 'false'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.get_version.outputs.version }}
+        name: MyoGeneratorRemix v${{ steps.get_version.outputs.version }}
+        body_path: CHANGELOG.md
+        files: |
+          MyoGeneratorRemix-v${{ steps.get_version.outputs.version }}.zip
+        draft: false
+        prerelease: ${{ contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'rc') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update latest release (if not prerelease)
+      if: steps.check_release.outputs.exists == 'false' && !contains(steps.get_version.outputs.version, 'beta') && !contains(steps.get_version.outputs.version, 'alpha') && !contains(steps.get_version.outputs.version, 'rc')
+      run: |
+        gh release edit v${{ steps.get_version.outputs.version }} --latest
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
