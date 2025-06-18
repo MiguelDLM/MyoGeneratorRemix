@@ -83,6 +83,11 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
             row.operator("view3d.muscle_preview_stop", text="Stop Preview", icon='PAUSE')
         else:
             row.operator("view3d.muscle_preview_update", text="Start Preview", icon='PLAY')
+
+
+        # Tip about using handles for diameter control
+        row = box.row()
+        row.label(text="Tip: Scale handles to adjust thickness", icon='INFO')
         
         # Mesh Quality Controls
         row = box.row()
@@ -95,6 +100,12 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         # Contour resolution
         row = box.row()
         row.prop(context.scene, "muscle_contour_resolution", text="Contour Resolution")
+
+        # Vertex order offsets for contour alignment
+        row = box.row(align=True)
+        row.prop(context.scene, "origin_contour_offset", text="Origin Offset")
+        row.prop(context.scene, "insertion_contour_offset", text="Insertion Offset")
+
         
         # Info about automatic Bezier control
         row = box.row()

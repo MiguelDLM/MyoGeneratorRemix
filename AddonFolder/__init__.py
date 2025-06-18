@@ -85,13 +85,33 @@ def register():
     )
 
     bpy.types.Scene.muscle_contour_resolution = bpy.props.IntProperty(
-        name="Contour Resolution", 
+        name="Contour Resolution",
         description="Resolution of the contour loops (vertex count)",
         default=16,
         min=6,
         max=64,
         update=update_mesh_density
     )
+
+    # Vertex order offsets for contour alignment
+    bpy.types.Scene.origin_contour_offset = bpy.props.IntProperty(
+        name="Origin Offset",
+        description="Shift origin contour vertices for better alignment",
+        default=0,
+        min=0,
+        max=64,
+        update=update_mesh_density
+    )
+
+    bpy.types.Scene.insertion_contour_offset = bpy.props.IntProperty(
+        name="Insertion Offset",
+        description="Shift insertion contour vertices for better alignment",
+        default=0,
+        min=0,
+        max=64,
+        update=update_mesh_density
+    )
+
 
     # Muscle force calculation constant
     bpy.types.Scene.muscle_constant = bpy.props.FloatProperty(
@@ -130,3 +150,5 @@ def unregister():
     del bpy.types.Scene.muscle_curve_subdivisions
     del bpy.types.Scene.muscle_contour_resolution
     del bpy.types.Scene.muscle_constant
+    del bpy.types.Scene.origin_contour_offset
+    del bpy.types.Scene.insertion_contour_offset
