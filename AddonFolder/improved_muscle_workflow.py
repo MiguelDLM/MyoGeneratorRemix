@@ -527,7 +527,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return {'PASS_THROUGH'}
             
         except Exception as e:
-            print(f"Preview modal error: {e}")
+            self.report({'ERROR'}, f"Preview modal error: {e}")
             self.finish_preview(context)
             return {'FINISHED'}
     
@@ -696,7 +696,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             insertion_contour = target_collection.objects.get(muscle_name + "_insertion_contour")
             
             if not all([curve_obj, origin_contour, insertion_contour]):
-                print("Missing required objects for preview")
+                self.report({'ERROR'}, "Missing required objects for preview")
                 return False
             
             # Remove existing preview
@@ -741,16 +741,13 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return False
                 
         except Exception as e:
-            print(f"Error updating preview: {e}")
+            self.report({'ERROR'}, f"Error updating preview: {e}")
             import traceback
             traceback.print_exc()
             return False
     
     def create_simple_preview_mesh(self, context, curve_obj, origin_contour, insertion_contour):
-        """Create preview mesh using Bezier parallel transport for robust orientation
-        The mesh generation algorithm depends on the scene property
-        ``muscle_lofting_mode`` which can be ``BASIC``, ``SMOOTH`` or ``CYLINDER``.
-        """
+        """Create preview mesh using Bezier parallel transport for robust orientation"""
         bm = bmesh.new()
 
         try:
@@ -763,7 +760,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             insertion_loop = self.get_contour_vertices(insertion_contour)
                        
             if not origin_loop or not insertion_loop:
-                print("ERROR: Missing contour vertices")
+                self.report({'ERROR'}, "Missing contour vertices")
                 return None
             
             # Calculate original centroids
@@ -778,9 +775,6 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             # Get curve subdivisions
             curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))
             
-            # Determine lofting mode
-            mode = getattr(context.scene, 'muscle_lofting_mode', 'BASIC')
-
             # Generate mesh using parallel transport orientation
             vertex_loops = []
             
@@ -800,25 +794,13 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                     interpolated_vert = origin_vert.lerp(insertion_vert, t)
                     interpolated_contour.append(interpolated_vert)
 
-                # Calculate center and average radius of the contour
+                # Calculate center of the interpolated contour
                 interpolated_center = sum(interpolated_contour, Vector()) / len(interpolated_contour)
-                avg_len = sum((v - interpolated_center).length for v in interpolated_contour) / len(interpolated_contour)
-
-                # Determine circular blend for cylindrical mode
-                if mode == 'CYLINDER':
-                    blend = 1.0 - min(1.0, abs(t - 0.5) / 0.3)
-                else:
-                    blend = 0.0
 
                 # Create the final loop by moving each vertex from interpolated position to curve position
                 interpolated_loop = []
                 for vertex in interpolated_contour:
                     offset = vertex - interpolated_center
-
-                    if blend > 0.0 and offset.length > 1e-6:
-                        circular = offset.normalized() * avg_len
-                        offset = offset.lerp(circular, blend)
-
                     scaled_offset = offset * radius
                     final_pos = position + scaled_offset
                     interpolated_loop.append(final_pos)
@@ -876,9 +858,9 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             # Clean up
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
 
-            if mode == 'SMOOTH':
-                for _ in range(3):
-                    bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.5)
+            # Apply light smoothing to soften the preview mesh
+            for _ in range(2):
+                bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.5)
 
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             
@@ -890,7 +872,7 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return mesh
             
         except Exception as e:
-            print(f"Error in create_simple_preview_mesh: {e}")
+            self.report({'ERROR'}, f"Error in create_simple_preview_mesh: {e}")
             import traceback
             traceback.print_exc()
             return None

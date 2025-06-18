@@ -93,17 +93,6 @@ def register():
         update=update_mesh_density
     )
 
-    bpy.types.Scene.muscle_lofting_mode = bpy.props.EnumProperty(
-        name="Lofting Mode",
-        description="Mesh generation algorithm",
-        items=[
-            ('BASIC', "Lofting basico", "Standard lofting"),
-            ('SMOOTH', "Lofting suavizado", "Apply smoothing after loft"),
-            ('CYLINDER', "Cilindrico", "Blend contours into a circular shape")
-        ],
-        default='BASIC',
-        update=update_mesh_density
-    )
 
     # Muscle force calculation constant
     bpy.types.Scene.muscle_constant = bpy.props.FloatProperty(
@@ -142,4 +131,3 @@ def unregister():
     del bpy.types.Scene.muscle_curve_subdivisions
     del bpy.types.Scene.muscle_contour_resolution
     del bpy.types.Scene.muscle_constant
-    del bpy.types.Scene.muscle_lofting_mode
