@@ -95,6 +95,10 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         # Contour resolution
         row = box.row()
         row.prop(context.scene, "muscle_contour_resolution", text="Contour Resolution")
+
+        # Lofting mode selection
+        row = box.row()
+        row.prop(context.scene, "muscle_lofting_mode", text="Lofting Mode")
         
         # Info about automatic Bezier control
         row = box.row()

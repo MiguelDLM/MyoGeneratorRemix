@@ -746,9 +746,12 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             return False
     
     def create_simple_preview_mesh(self, context, curve_obj, origin_contour, insertion_contour):
-        """Create preview mesh using Bezier parallel transport for robust orientation"""
+        """Create preview mesh using Bezier parallel transport for robust orientation
+        The mesh generation algorithm depends on the scene property
+        ``muscle_lofting_mode`` which can be ``BASIC``, ``SMOOTH`` or ``CYLINDER``.
+        """
         bm = bmesh.new()
-        
+
         try:
             
             # Reset orientation frame for new mesh generation
@@ -774,41 +777,48 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             # Get curve subdivisions
             curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))
             
+            # Determine lofting mode
+            mode = getattr(context.scene, 'muscle_lofting_mode', 'BASIC')
+
             # Generate mesh using parallel transport orientation
             vertex_loops = []
             
             
             for i in range(curve_subdivisions):
                 t = i / (curve_subdivisions - 1) if curve_subdivisions > 1 else 0.0
-                
+
                 # Get orientation frame and position from Bezier curve using parallel transport
                 tangent, normal, binormal, radius = calculate_consistent_orientation_frame(curve_obj, t)
                 position, _, _ = get_bezier_point_at_parameter(curve_obj, t)
-                
-                
-                # Create interpolated contour and move it to curve position
-                
-                # Linear interpolation between origin and insertion contours  
+
+                # Linear interpolation between origin and insertion contours
                 interpolated_contour = []
                 for j in range(target_count):
                     origin_vert = origin_resampled[j]
                     insertion_vert = insertion_resampled[j]
                     interpolated_vert = origin_vert.lerp(insertion_vert, t)
                     interpolated_contour.append(interpolated_vert)
-                
-                # Calculate the center of the interpolated contour
+
+                # Calculate center and average radius of the contour
                 interpolated_center = sum(interpolated_contour, Vector()) / len(interpolated_contour)
-                
+                avg_len = sum((v - interpolated_center).length for v in interpolated_contour) / len(interpolated_contour)
+
+                # Determine circular blend for cylindrical mode
+                if mode == 'CYLINDER':
+                    blend = 1.0 - min(1.0, abs(t - 0.5) / 0.3)
+                else:
+                    blend = 0.0
+
                 # Create the final loop by moving each vertex from interpolated position to curve position
                 interpolated_loop = []
                 for vertex in interpolated_contour:
-                    # Get the offset from the interpolated center
                     offset = vertex - interpolated_center
-                    
-                    # Apply radius scaling
+
+                    if blend > 0.0 and offset.length > 1e-6:
+                        circular = offset.normalized() * avg_len
+                        offset = offset.lerp(circular, blend)
+
                     scaled_offset = offset * radius
-                    
-                    # Place the vertex at the curve position with the scaled offset
                     final_pos = position + scaled_offset
                     interpolated_loop.append(final_pos)
                 
@@ -864,6 +874,10 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             
             # Clean up
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
+
+            if mode == 'SMOOTH':
+                bmesh.ops.smooth_vert(bm, verts=bm.verts, factor=0.5, repeat=3)
+
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             
             # Create mesh

@@ -76,9 +76,24 @@ def get_bezier_point_at_parameter(curve_obj, t):
             fallback_tangent = curve_obj.matrix_world.to_3x3() @ (p3 - p0)
             world_tangent = fallback_tangent.normalized() if fallback_tangent.length > 0 else Vector((1, 0, 0))
         
-        # Interpolate radius
+        # Interpolate radius using control point radius values
         radius = r0 * (1.0 - local_t) + r1 * local_t
-        
+
+        # Additional scaling based on handle length to allow "inflating" the
+        # mesh by simply adjusting handle size in the UI.  Longer handles will
+        # create a thicker cross section while shorter ones constrict it.
+        seg_len = (p3 - p0).length
+        if seg_len > 0:
+            h0 = (p1 - p0).length / seg_len
+            h1 = (p3 - p2).length / seg_len
+            handle_ratio = (h0 * (1.0 - local_t) + h1 * local_t)
+        else:
+            handle_ratio = 0.0
+
+        # Limit influence to avoid excessively large diameters
+        handle_ratio = max(0.0, min(handle_ratio, 2.0))
+        radius *= 1.0 + handle_ratio * 0.5
+
         return world_position, world_tangent, max(0.1, radius)
     
     return Vector((0, 0, 0)), Vector((1, 0, 0)), 1.0
@@ -294,39 +309,14 @@ def parallel_transport_frame(prev_tangent, curr_tangent, prev_normal, prev_binor
     prev_normal = prev_normal.normalized()
     prev_binormal = prev_binormal.normalized()
     
-    # Calculate reflection vector (Rodrigues' rotation formula approach)
-    # This is more stable than direct rotation matrix for large angles
-    
-    # Calculate the bisector direction for smooth transition
-    bisector = (prev_tangent + curr_tangent)
-    
-    if bisector.length < 1e-6:
-        # Tangents are opposite, handle 180° case specially
-        # Find a perpendicular vector to use as reflection plane normal
-        if abs(prev_tangent.x) < 0.9:
-            reflection_normal = Vector((1, 0, 0))
-        else:
-            reflection_normal = Vector((0, 1, 0))
-        
-        # Make it perpendicular to the tangent
-        reflection_normal = reflection_normal - reflection_normal.dot(prev_tangent) * prev_tangent
-        reflection_normal = reflection_normal.normalized()
-        
-        # Reflect the frame vectors
-        new_normal = prev_normal - 2.0 * prev_normal.dot(reflection_normal) * reflection_normal
-        new_binormal = prev_binormal - 2.0 * prev_binormal.dot(reflection_normal) * reflection_normal
-        
-    else:
-        bisector = bisector.normalized()
-        
-        # Use reflection method for smoother transitions
-        # Reflect prev_normal in the plane perpendicular to bisector
-        dot_product = prev_normal.dot(bisector)
-        new_normal = prev_normal - 2.0 * dot_product * bisector
-        
-        # Reflect prev_binormal in the same plane
-        dot_product = prev_binormal.dot(bisector)
-        new_binormal = prev_binormal - 2.0 * dot_product * bisector
+    # Use quaternion rotation based on tangent difference for a robust
+    # rotation-minimizing frame. This handles very sharp bends without
+    # introducing flips or concave artifacts.
+
+    # Rotation that aligns previous tangent with current tangent
+    rot_quat = prev_tangent.rotation_difference(curr_tangent)
+    new_normal = (rot_quat @ prev_normal).normalized()
+    new_binormal = (rot_quat @ prev_binormal).normalized()
     
     # Ensure the frame is orthogonal to current tangent using Gram-Schmidt
     # Project out any component along the current tangent
