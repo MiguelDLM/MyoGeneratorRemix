@@ -13,11 +13,11 @@ license = [
 ]
 copyright = [
     "Niccolo Fioritti and Eva Herbst 2022",
-    "2024 Miguel Díaz de León" 
+    "Miguel Díaz de León 2024" 
 ]
 platforms = ["windows-x64", "macos-arm64", "linux-x64"]
 [permissions]
-files = "Import/export FBX from/to disk"
+files = "Import/export meshes and CSV from/to disk"
 [build]
 paths_exclude_pattern = [
    "__pycache__/",
