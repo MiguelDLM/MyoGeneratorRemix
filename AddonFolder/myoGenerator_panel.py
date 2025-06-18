@@ -106,6 +106,11 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         row.prop(context.scene, "origin_contour_offset", text="Origin Offset")
         row.prop(context.scene, "insertion_contour_offset", text="Insertion Offset")
 
+        # Option to reverse contour orientation if needed
+        row = box.row(align=True)
+        row.prop(context.scene, "origin_reverse_orientation", text="Reverse Origin")
+        row.prop(context.scene, "insertion_reverse_orientation", text="Reverse Insertion")
+
         
         # Info about automatic Bezier control
         row = box.row()

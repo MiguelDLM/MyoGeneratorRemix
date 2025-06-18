@@ -636,7 +636,11 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         """Create hash of density control values to detect changes"""
         return hash((
             context.scene.muscle_curve_subdivisions,
-            context.scene.muscle_contour_resolution
+            context.scene.muscle_contour_resolution,
+            getattr(context.scene, 'origin_contour_offset', 0),
+            getattr(context.scene, 'insertion_contour_offset', 0),
+            getattr(context.scene, 'origin_reverse_orientation', False),
+            getattr(context.scene, 'insertion_reverse_orientation', False)
         ))
     
     def get_curve_structure_hash(self, curve_obj):
@@ -778,9 +782,13 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             if origin_resampled:
                 origin_offset %= len(origin_resampled)
                 origin_resampled = origin_resampled[origin_offset:] + origin_resampled[:origin_offset]
+                if getattr(context.scene, 'origin_reverse_orientation', False):
+                    origin_resampled = list(reversed(origin_resampled))
             if insertion_resampled:
                 insertion_offset %= len(insertion_resampled)
                 insertion_resampled = insertion_resampled[insertion_offset:] + insertion_resampled[:insertion_offset]
+                if getattr(context.scene, 'insertion_reverse_orientation', False):
+                    insertion_resampled = list(reversed(insertion_resampled))
             
             # Get curve subdivisions
             curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))

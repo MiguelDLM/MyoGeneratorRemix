@@ -112,6 +112,21 @@ def register():
         update=update_mesh_density
     )
 
+    # Optional reversal of contour vertex orientation
+    bpy.types.Scene.origin_reverse_orientation = bpy.props.BoolProperty(
+        name="Reverse Origin",
+        description="Reverse origin contour vertex order",
+        default=False,
+        update=update_mesh_density,
+    )
+
+    bpy.types.Scene.insertion_reverse_orientation = bpy.props.BoolProperty(
+        name="Reverse Insertion",
+        description="Reverse insertion contour vertex order",
+        default=False,
+        update=update_mesh_density,
+    )
+
 
     # Muscle force calculation constant
     bpy.types.Scene.muscle_constant = bpy.props.FloatProperty(
@@ -152,3 +167,5 @@ def unregister():
     del bpy.types.Scene.muscle_constant
     del bpy.types.Scene.origin_contour_offset
     del bpy.types.Scene.insertion_contour_offset
+    del bpy.types.Scene.origin_reverse_orientation
+    del bpy.types.Scene.insertion_reverse_orientation
