@@ -89,6 +89,12 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         row = box.row()
         row.label(text="Tip: Scale handles to adjust thickness", icon='INFO')
         
+
+
+        # Tip about using handles for diameter control
+        row = box.row()
+        row.label(text="Tip: Scale handles to adjust thickness", icon='INFO')
+        
         # Mesh Quality Controls
         row = box.row()
         row.label(text="Mesh Quality:", icon='MESH_ICOSPHERE')

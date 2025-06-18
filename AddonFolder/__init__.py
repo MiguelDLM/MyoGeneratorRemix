@@ -86,6 +86,7 @@ def register():
 
     bpy.types.Scene.muscle_contour_resolution = bpy.props.IntProperty(
         name="Contour Resolution",
+        name="Contour Resolution",
         description="Resolution of the contour loops (vertex count)",
         default=16,
         min=6,
