@@ -1,6 +1,6 @@
-schema_version = "V2.0 Beta"
+schema_version = "2.0.0-beta"
 id = "MyoGeneratorRemix"
-version = "V2.0 Beta"
+version = "2.0.0-beta"
 name = "MyoGeneratorRemix"
 tagline = "Add-on for muscle reconstruction"
 maintainer = "Miguel Díaz de León <migueldlm1307@gmai.com>"
