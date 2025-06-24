@@ -3,10 +3,6 @@ name: Manual Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release version (e.g., 2.0.0, 2.1.0-beta)'
-        required: true
-        type: string
       prerelease:
         description: 'Mark as pre-release'
         required: false
@@ -23,26 +19,19 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Update version in manifest
+    - name: Get version from manifest
+      id: get_version
       run: |
-        sed -i 's/version = ".*"/version = "${{ github.event.inputs.version }}"/' AddonFolder/blender_manifest.toml
-        echo "Updated version to ${{ github.event.inputs.version }}"
-        grep -E '^version\s*=' AddonFolder/blender_manifest.toml
-
-    - name: Commit version update
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add AddonFolder/blender_manifest.toml
-        git commit -m "Update version to ${{ github.event.inputs.version }}" || exit 0
-        git push
+        VERSION=$(grep '^version = ' AddonFolder/blender_manifest.toml | sed 's/version = "\(.*\)"/\1/')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version from manifest: $VERSION"
 
     - name: Create addon zip
       run: |
         cd AddonFolder
-        zip -r ../MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip . -x "*.pyc" "__pycache__/*" ".git*" "*.log"
+        zip -r ../MyoGeneratorRemix-v${{ steps.get_version.outputs.version }}.zip . -x "*.pyc" "__pycache__/*" ".git*" "*.log"
         cd ..
-        ls -la MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip
+        ls -la MyoGeneratorRemix-v${{ steps.get_version.outputs.version }}.zip
 
     - name: Generate changelog
       id: changelog
@@ -60,11 +49,11 @@ jobs:
         
         # Create changelog file
         cat > CHANGELOG.md << EOF
-        ## What's Changed in v${{ github.event.inputs.version }}
+        ## What's Changed in v${{ steps.get_version.outputs.version }}
         
         ${CHANGELOG}
         
-        **Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ github.event.inputs.version }}
+        **Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.get_version.outputs.version }}
         EOF
         
         echo "Generated changelog:"
@@ -73,11 +62,11 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v${{ github.event.inputs.version }}
-        name: MyoGeneratorRemix v${{ github.event.inputs.version }}
+        tag_name: v${{ steps.get_version.outputs.version }}
+        name: MyoGeneratorRemix v${{ steps.get_version.outputs.version }}
         body_path: CHANGELOG.md
         files: |
-          MyoGeneratorRemix-v${{ github.event.inputs.version }}.zip
+          MyoGeneratorRemix-v${{ steps.get_version.outputs.version }}.zip
         draft: false
         prerelease: ${{ github.event.inputs.prerelease }}
       env:
