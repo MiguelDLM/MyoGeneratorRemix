@@ -8,6 +8,7 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
     bl_category = "MyoGeneratorRemix"
     bl_options = {'DEFAULT_CLOSED'}
     
+    #Menu for the panel
     def draw(self, context):
         layout = self.layout
 
