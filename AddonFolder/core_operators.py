@@ -349,7 +349,15 @@ class Calculate_Muscle_Parameters_Op(bpy.types.Operator):
                 pcsa = 0.0
                 if fiber_length > 0:
                     pcsa = volume / fiber_length
-                
+
+                # Store PCSA in the objects for reference
+                if muscle_obj:
+                    muscle_obj["PCSA"] = pcsa
+                if origin_obj:
+                    origin_obj["PCSA"] = pcsa
+                if insertion_obj:
+                    insertion_obj["PCSA"] = pcsa
+
                 # Calculate muscle force
                 force = pcsa * muscle_constant
                 
