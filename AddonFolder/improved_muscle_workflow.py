@@ -732,9 +732,14 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             # Check if curve needs special handling for inversions
             needs_special_handling = detect_global_inversions(curve_obj)
             
-            preview_mesh = self.create_simple_preview_mesh(
-                context, curve_obj, origin_contour, insertion_contour
-            )
+            # Choose lofting mode based on scene property
+            mode = getattr(context.scene, 'muscle_connection_mode', 'FOLLOW_PATH')
+            if mode == 'DIRECT_CONNECTION':
+                preview_mesh = self.create_direct_preview_mesh(context, origin_contour, insertion_contour)
+            else:
+                preview_mesh = self.create_simple_preview_mesh(
+                    context, curve_obj, origin_contour, insertion_contour
+                )
             
             if preview_mesh:
                 # Create preview object
@@ -794,8 +799,8 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
                 if getattr(context.scene, 'insertion_reverse_orientation', False):
                     insertion_resampled = list(reversed(insertion_resampled))
             
-            # Get curve subdivisions
-            curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions * 0.6))
+            # Get curve subdivisions (use scene value directly so user control affects density)
+            curve_subdivisions = max(4, int(context.scene.muscle_curve_subdivisions))
             
             # Generate mesh using parallel transport orientation
             vertex_loops = []
@@ -912,6 +917,98 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
             resampled.append(vertices[index])
         
         return resampled
+
+    def create_direct_preview_mesh(self, context, origin_contour, insertion_contour):
+        """Create a preview mesh by directly connecting origin and insertion contours without following the curve"""
+        bm = bmesh.new()
+
+        try:
+            origin_loop = self.get_contour_vertices(origin_contour)
+            insertion_loop = self.get_contour_vertices(insertion_contour)
+
+            if not origin_loop or not insertion_loop:
+                self.report({'ERROR'}, "Missing contour vertices for direct connection")
+                return None
+
+            # Use same target resolution as other method
+            target_count = max(6, int(context.scene.muscle_contour_resolution * 0.75))
+            origin_resampled = self.simple_resample(origin_loop, target_count)
+            insertion_resampled = self.simple_resample(insertion_loop, target_count)
+
+            # Apply offsets and reversals
+            origin_offset = getattr(context.scene, 'origin_contour_offset', 0)
+            insertion_offset = getattr(context.scene, 'insertion_contour_offset', 0)
+            origin_offset %= len(origin_resampled)
+            insertion_offset %= len(insertion_resampled)
+            origin_resampled = origin_resampled[origin_offset:] + origin_resampled[:origin_offset]
+            insertion_resampled = insertion_resampled[insertion_offset:] + insertion_resampled[:insertion_offset]
+            if getattr(context.scene, 'origin_reverse_orientation', False):
+                origin_resampled = list(reversed(origin_resampled))
+            if getattr(context.scene, 'insertion_reverse_orientation', False):
+                insertion_resampled = list(reversed(insertion_resampled))
+
+            # Create multiple intermediate loops by interpolating between origin and insertion
+            curve_subdivisions = max(2, int(context.scene.muscle_curve_subdivisions))
+            vertex_loops = []
+
+            for i in range(curve_subdivisions):
+                t = i / (curve_subdivisions - 1) if curve_subdivisions > 1 else 0.0
+                interpolated_loop = []
+                for j in range(len(origin_resampled)):
+                    o = origin_resampled[j]
+                    ins = insertion_resampled[j]
+                    interpolated = o.lerp(ins, t)
+                    interpolated_loop.append(interpolated)
+
+                # Add verts of this loop to bmesh
+                loop_verts = [bm.verts.new(co) for co in interpolated_loop]
+                vertex_loops.append(loop_verts)
+
+            bm.verts.ensure_lookup_table()
+
+            # Bridge consecutive loops
+            for i in range(len(vertex_loops) - 1):
+                current_loop = vertex_loops[i]
+                next_loop = vertex_loops[i + 1]
+                if len(current_loop) == len(next_loop):
+                    for j in range(len(current_loop)):
+                        j_next = (j + 1) % len(current_loop)
+                        v1 = current_loop[j]
+                        v2 = next_loop[j]
+                        v3 = next_loop[j_next]
+                        v4 = current_loop[j_next]
+
+                        try:
+                            bm.faces.new([v1, v2, v3, v4])
+                        except ValueError:
+                            try:
+                                bm.faces.new([v1, v2, v3])
+                                bm.faces.new([v1, v3, v4])
+                            except ValueError:
+                                continue
+
+            # Add caps using first and last loop
+            if len(vertex_loops) > 0:
+                if len(vertex_loops[0]) > 2:
+                    self.create_cap_faces(bm, vertex_loops[0], reverse=False)
+                if len(vertex_loops[-1]) > 2:
+                    self.create_cap_faces(bm, vertex_loops[-1], reverse=True)
+
+            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+            mesh = bpy.data.meshes.new("preview_mesh")
+            bm.to_mesh(mesh)
+            mesh.update()
+            return mesh
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Error in create_direct_preview_mesh: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        finally:
+            bm.free()
     
     def get_curve_sample_points(self, curve_obj, num_samples):
         """Sample points along curve path with better interpolation"""

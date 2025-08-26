@@ -80,6 +80,10 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         
         # Preview controls
         row = box.row()
+        # Connection mode selector (appears before preview controls)
+        row = box.row()
+        row.prop(context.scene, "muscle_connection_mode", text="Connection Mode", expand=True)
+
         if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
             row.operator("view3d.muscle_preview_stop", text="Stop Preview", icon='PAUSE')
         else:

@@ -139,6 +139,17 @@ def register():
         step=0.01
     )
 
+    # Connection mode for lofting: follow the curve path or directly connect origin->insertion
+    bpy.types.Scene.muscle_connection_mode = bpy.props.EnumProperty(
+        name="Connection Mode",
+        description="Choose how the muscle loft connects origin and insertion",
+        items=[
+            ('FOLLOW_PATH', "Follow Path", "Loft along the curve path (default)"),
+            ('DIRECT_CONNECTION', "Direct Connection", "Connect origin and insertion directly, ignoring curve curvature")
+        ],
+        default='FOLLOW_PATH'
+    )
+
 
 def unregister():
     bpy.utils.unregister_class(Muscle_Name_Submition)
@@ -169,3 +180,4 @@ def unregister():
     del bpy.types.Scene.insertion_contour_offset
     del bpy.types.Scene.origin_reverse_orientation
     del bpy.types.Scene.insertion_reverse_orientation
+    del bpy.types.Scene.muscle_connection_mode
