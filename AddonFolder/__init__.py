@@ -17,16 +17,20 @@ from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
                             Select_Insertion_Op, Submit_Origin_Op,    
                             Submit_Insertion_Op, Next_Muscle_Op,
                             Calculate_Muscle_Parameters_Op)
-from .muscle_utilities import (update_mesh_density)
+from .muscle_utilities import (update_mesh_density, calculate_muscle_volume)
 from .improved_muscle_workflow import (Muscle_Curve_Creation_Op, 
                                      Muscle_Mesh_Generation_Op,
                                      Muscle_Preview_Update_Op,
                                      Muscle_Preview_Stop_Op)
 from .myoGenerator_panel import MYOGENERATOR_PT_panel
+from .core_operators import Estimate_Selected_Volumes_Op
 
 
 
 def register():
+    # Register addon preferences FIRST
+    bpy.utils.register_class(MyoGeneratorPreferences)
+    
     bpy.utils.register_class(Muscle_Name_Submition)
     bpy.utils.register_class(Select_Origin_Op)
     bpy.utils.register_class(Select_Insertion_Op)
@@ -34,6 +38,8 @@ def register():
     bpy.utils.register_class(Submit_Insertion_Op)
     bpy.utils.register_class(Calculate_Muscle_Parameters_Op)
     bpy.utils.register_class(Next_Muscle_Op)
+    # Register core UI panel after core operators so buttons reference valid operators
+    bpy.utils.register_class(Estimate_Selected_Volumes_Op)
     bpy.utils.register_class(MYOGENERATOR_PT_panel)
     
     # Register improved workflow classes
@@ -41,6 +47,9 @@ def register():
     bpy.utils.register_class(Muscle_Mesh_Generation_Op)
     bpy.utils.register_class(Muscle_Preview_Update_Op)
     bpy.utils.register_class(Muscle_Preview_Stop_Op)
+
+    # Register fallback operator (always available) for estimating volumes in the Advanced UI
+    bpy.utils.register_class(MYOGENERATOR_OT_estimate_selected_volumes)
 
 
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
@@ -150,6 +159,32 @@ def register():
         default='FOLLOW_PATH'
     )
 
+    # Temporary scene storage for advanced UI (sum of selected volumes)
+    bpy.types.Scene.advanced_selected_volume = bpy.props.FloatProperty(
+        name="Advanced Selected Volume",
+        description="Holds the last computed total volume for selected objects (m³)",
+        default=0.0,
+        precision=6
+    )
+
+
+# Addon Preferences Class
+class MyoGeneratorPreferences(bpy.types.AddonPreferences):
+    # Use the package name so it matches both dev (bl_ext.vscode_development.AddonFolder)
+    # and installed addon module names automatically.
+    bl_idname = __package__
+
+    # Define as an annotation so Blender's RNA picks it up reliably.
+    show_advanced: bpy.props.BoolProperty(
+        name="Show Advanced (experimental) features",
+        description="Enable experimental features in the MyoGenerator panel",
+        default=False,
+    )
+    
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "show_advanced")
+
 
 def unregister():
     bpy.utils.unregister_class(Muscle_Name_Submition)
@@ -160,12 +195,14 @@ def unregister():
     bpy.utils.unregister_class(Calculate_Muscle_Parameters_Op)
     bpy.utils.unregister_class(Next_Muscle_Op)
     bpy.utils.unregister_class(MYOGENERATOR_PT_panel)
-    
+    bpy.utils.unregister_class(Estimate_Selected_Volumes_Op)
+    bpy.utils.unregister_class(MyoGeneratorPreferences)
     # Unregister improved workflow classes
     bpy.utils.unregister_class(Muscle_Curve_Creation_Op)
     bpy.utils.unregister_class(Muscle_Mesh_Generation_Op)
     bpy.utils.unregister_class(Muscle_Preview_Update_Op)
     bpy.utils.unregister_class(Muscle_Preview_Stop_Op)
+    bpy.utils.unregister_class(MYOGENERATOR_OT_estimate_selected_volumes)
 
 
     del bpy.types.Scene.muscle_Name
@@ -181,3 +218,34 @@ def unregister():
     del bpy.types.Scene.origin_reverse_orientation
     del bpy.types.Scene.insertion_reverse_orientation
     del bpy.types.Scene.muscle_connection_mode
+    del bpy.types.Scene.advanced_selected_volume
+
+
+# Fallback operator for estimating volumes (ensures button exists regardless of core_operators import order)
+class MYOGENERATOR_OT_estimate_selected_volumes(bpy.types.Operator):
+    bl_idname = "myogenerator.estimate_selected_volumes"
+    bl_label = "Estimate Selected Volumes"
+    bl_description = "Estimate the total volume of selected mesh objects (fallback)"
+
+    def execute(self, context):
+        selected = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        if not selected:
+            self.report({'WARNING'}, "No mesh objects selected")
+            context.scene.advanced_selected_volume = 0.0
+            return {'CANCELLED'}
+
+        total_volume = 0.0
+        for obj in selected:
+            try:
+                vol = calculate_muscle_volume(obj)
+                total_volume += vol
+            except Exception:
+                continue
+
+        try:
+            context.scene.advanced_selected_volume = float(total_volume)
+        except Exception:
+            context.scene.advanced_selected_volume = 0.0
+
+        self.report({'INFO'}, f"Estimated total volume: {total_volume:.6f} m³")
+        return {'FINISHED'}

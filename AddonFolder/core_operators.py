@@ -42,6 +42,38 @@ class Muscle_Name_Submition(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class Estimate_Selected_Volumes_Op(bpy.types.Operator):
+    """Estimate summed volume of selected mesh objects"""
+    bl_idname = "view3d.estimate_selected_volumes"
+    bl_label = "Estimate Selected Volumes"
+    bl_description = "Estimate the total volume of all selected mesh objects and display the result"
+
+    def execute(self, context):
+        selected = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        if not selected:
+            self.report({'WARNING'}, "No mesh objects selected")
+            context.scene.advanced_selected_volume = 0.0
+            return {'CANCELLED'}
+
+        total_volume = 0.0
+        for obj in selected:
+            try:
+                vol = calculate_muscle_volume(obj)
+                total_volume += vol
+            except Exception:
+                # Skip non-manifold or problematic meshes
+                continue
+
+        # Store on scene for UI display
+        try:
+            context.scene.advanced_selected_volume = float(total_volume)
+        except Exception:
+            context.scene.advanced_selected_volume = 0.0
+
+        self.report({'INFO'}, f"Estimated total volume: {total_volume:.6f} m³")
+        return {'FINISHED'}
+
+
 class Select_Origin_Op(bpy.types.Operator):
     """Select origin faces"""
     bl_idname = "view3d.select_origin"

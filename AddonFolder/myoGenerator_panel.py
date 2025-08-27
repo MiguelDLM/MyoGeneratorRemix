@@ -134,3 +134,42 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         
         row = box.row()
         row.operator("view3d.calculate_muscle_parameters", text="Calculate Muscle Parameters")
+
+        # Advanced (experimental) features from Add-on preferences
+        show_adv = False
+        
+        try:
+            # Try multiple possible addon names (development vs released)
+            addon_names = [
+                "bl_ext.vscode_development.AddonFolder",  # VSCode development mode
+                "MyoGeneratorRemix",  # Released version
+                "bl_ext.user_default.MyoGeneratorRemix",  # User extensions
+            ]
+            
+            for addon_name in addon_names:
+                addon_prefs = bpy.context.preferences.addons.get(addon_name)
+                if addon_prefs and hasattr(addon_prefs, 'preferences'):
+                    prefs = addon_prefs.preferences
+                    if hasattr(prefs, 'show_advanced'):
+                        show_adv = bool(prefs.show_advanced)
+                        break
+                            
+        except Exception as e:
+            show_adv = False
+
+        if show_adv:
+            layout.separator()
+            adv_box = layout.box()
+            adv_box.label(text="Advanced (experimental)")
+
+            row = adv_box.row()
+            # Prefer the core operator if registered, otherwise fallback to the packaged operator
+            if hasattr(bpy.ops, 'view3d') and hasattr(bpy.ops.view3d, 'estimate_selected_volumes'):
+                row.operator("view3d.estimate_selected_volumes", text="Estimate Selected Volumes")
+            else:
+                row.operator("myogenerator.estimate_selected_volumes", text="Estimate Selected Volumes")
+
+            # Display last computed value from scene (in cubic meters)
+            total_vol = getattr(context.scene, 'advanced_selected_volume', 0.0)
+            row = adv_box.row()
+            row.label(text=f"Selected Total Volume: {total_vol:.6f} m³")
