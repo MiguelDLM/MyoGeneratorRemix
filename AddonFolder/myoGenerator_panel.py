@@ -169,7 +169,121 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
             else:
                 row.operator("myogenerator.estimate_selected_volumes", text="Estimate Selected Volumes")
 
-            # Display last computed value from scene (in cubic meters)
-            total_vol = getattr(context.scene, 'advanced_selected_volume', 0.0)
+            # Display last computed value converted to the scene unit system
+            total_vol_m3 = getattr(context.scene, 'advanced_selected_volume', 0.0)
+            # Default values
+            displayed_vol = total_vol_m3
+            suffix = "m³"
+
+            try:
+                us = context.scene.unit_settings
+                scale = float(getattr(us, 'scale_length', 1.0)) or 1.0
+
+                # Try to detect explicit declared length unit if available (Blender exposes length_unit enum)
+                length_unit = getattr(us, 'length_unit', None)
+
+                # Map length unit enum or value to a human unit (meters, centimeters, millimeters, inches)
+                if length_unit:
+                    lu = str(length_unit).upper()
+                    # Common enum names include 'METERS', 'CENTIMETERS', 'MILLIMETERS', 'INCHES', 'FEET'
+                    if 'MILLIM' in lu or 'MM' == lu:
+                        unit_len = 'mm'
+                    elif 'CENTIM' in lu or 'CM' == lu:
+                        unit_len = 'cm'
+                    elif 'INCH' in lu or 'IN' == lu:
+                        unit_len = 'in'
+                    elif 'FOOT' in lu or 'FT' == lu:
+                        unit_len = 'ft'
+                    else:
+                        unit_len = 'm'
+                else:
+                    # Fallback to mapping common scale_length values
+                    if abs(scale - 0.001) < 1e-9:
+                        unit_len = 'mm'
+                    elif abs(scale - 0.01) < 1e-9:
+                        unit_len = 'cm'
+                    elif abs(scale - 0.0254) < 1e-9:
+                        unit_len = 'in'
+                    else:
+                        unit_len = 'm' if scale >= 1.0 else 'm'
+
+                # Convert canonical m³ to chosen length unit³
+                if unit_len == 'm':
+                    displayed_vol = total_vol_m3
+                    suffix = 'm³'
+                elif unit_len == 'cm':
+                    # 1 m³ = 1e6 cm³
+                    displayed_vol = total_vol_m3 * 1e6
+                    suffix = 'cm³'
+                elif unit_len == 'mm':
+                    # 1 m³ = 1e9 mm³
+                    displayed_vol = total_vol_m3 * 1e9
+                    suffix = 'mm³'
+                elif unit_len == 'in':
+                    # 1 m = 39.3700787402 in -> 1 m³ = (39.3700787402)^3 in³
+                    displayed_vol = total_vol_m3 * (39.3700787402 ** 3)
+                    suffix = 'in³'
+                else:
+                    displayed_vol = total_vol_m3
+                    suffix = 'm³'
+
+            except Exception:
+                # fallback already set
+                pass
+
+            # Format number sensibly: 4 decimals for medium values, 2 for large
+            if displayed_vol == 0:
+                disp_str = f"0.0000"
+            elif displayed_vol < 1.0:
+                disp_str = f"{displayed_vol:.6f}"
+            elif displayed_vol < 1000.0:
+                disp_str = f"{displayed_vol:.4f}"
+            else:
+                disp_str = f"{displayed_vol:,.2f}"
+
             row = adv_box.row()
-            row.label(text=f"Selected Total Volume: {total_vol:.6f} m³")
+            row.label(text=f"Selected Total Volume: {disp_str} {suffix}")
+            
+            # Density input (g/cm³)
+            row = adv_box.row()
+            row.prop(context.scene, "muscle_density_g_cm3", text="Density (g/cm³)")
+
+            # Option to hide non-muscle objects in muscle collections
+            row = adv_box.row()
+            row.prop(context.scene, "advanced_hide_non_muscle", text="Hide non-muscle objects")
+
+            # Mirror duplicate control (axis selector + button)
+            row = adv_box.row(align=True)
+            row.prop(context.scene, "myogenerator_mirror_axis", expand=True)
+            # Only show the Mirror Duplicate button if the operator is registered
+            if hasattr(bpy.ops, 'myogenerator') and hasattr(bpy.ops.myogenerator, 'mirror_duplicate'):
+                op = row.operator("myogenerator.mirror_duplicate", text="Mirror Duplicate")
+                # pass current scene property as default
+                try:
+                    op.axis = context.scene.myogenerator_mirror_axis
+                except Exception:
+                    pass
+            else:
+                row.label(text="Mirror Duplicate (operator not registered)")
+
+            # Total mass display (convert kg -> g for user view)
+            total_mass_kg = getattr(context.scene, 'advanced_selected_mass', 0.0)
+            try:
+                mass_g = total_mass_kg * 1000.0
+            except Exception:
+                mass_g = 0.0
+
+            if mass_g == 0:
+                mass_str = "0.00 g"
+            elif mass_g < 1000.0:
+                mass_str = f"{mass_g:.4f} g"
+            else:
+                mass_str = f"{mass_g:,.2f} g"
+
+            row = adv_box.row()
+            row.label(text=f"Estimated Total Mass: {mass_str}")
+
+            # PCSA total
+            pcsa_text = getattr(context.scene, 'advanced_selected_pcsa', "")
+            row = adv_box.row()
+            row.label(text=pcsa_text if pcsa_text else "Total PCSA: NA")

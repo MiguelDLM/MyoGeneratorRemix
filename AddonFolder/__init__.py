@@ -16,7 +16,9 @@ import bpy
 from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
                             Select_Insertion_Op, Submit_Origin_Op,    
                             Submit_Insertion_Op, Next_Muscle_Op,
-                            Calculate_Muscle_Parameters_Op)
+                            Calculate_Muscle_Parameters_Op,
+                            MYOGENERATOR_OT_toggle_hide_non_muscles,
+                            MYOGENERATOR_OT_mirror_duplicate)
 from .muscle_utilities import (update_mesh_density, calculate_muscle_volume)
 from .improved_muscle_workflow import (Muscle_Curve_Creation_Op, 
                                      Muscle_Mesh_Generation_Op,
@@ -24,6 +26,42 @@ from .improved_muscle_workflow import (Muscle_Curve_Creation_Op,
                                      Muscle_Preview_Stop_Op)
 from .myoGenerator_panel import MYOGENERATOR_PT_panel
 from .core_operators import Estimate_Selected_Volumes_Op
+
+
+# Helper to update visibility of non-muscle objects when the scene property changes
+def update_hide_non_muscle(self, context):
+    try:
+        muscles_collection = bpy.data.collections.get('muscles')
+        if not muscles_collection:
+            return
+
+        hide = bool(getattr(context.scene, 'advanced_hide_non_muscle', False))
+
+        for muscle_col in muscles_collection.children:
+            for obj in muscle_col.objects:
+                # Keep objects that are the final muscle mesh visible; hide others when requested
+                is_muscle = obj.name.endswith('_muscle')
+                if hide and not is_muscle:
+                    try:
+                        obj.hide_viewport = True
+                    except Exception:
+                        pass
+                    try:
+                        obj.hide_set(True)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        obj.hide_viewport = False
+                    except Exception:
+                        pass
+                    try:
+                        obj.hide_set(False)
+                    except Exception:
+                        pass
+    except Exception:
+        # Best-effort only; avoid raising in UI callbacks
+        return
 
 
 
@@ -47,9 +85,11 @@ def register():
     bpy.utils.register_class(Muscle_Mesh_Generation_Op)
     bpy.utils.register_class(Muscle_Preview_Update_Op)
     bpy.utils.register_class(Muscle_Preview_Stop_Op)
-
-    # Register fallback operator (always available) for estimating volumes in the Advanced UI
-    bpy.utils.register_class(MYOGENERATOR_OT_estimate_selected_volumes)
+    # Register mirror duplicate operator explicitly (guarded)
+    try:
+        bpy.utils.register_class(MYOGENERATOR_OT_mirror_duplicate)
+    except Exception as e:
+        print(f"MyoGenerator: mirror operator register skipped/failed: {e}")
 
 
     bpy.types.Scene.conf_path = bpy.props.StringProperty(
@@ -141,11 +181,11 @@ def register():
     bpy.types.Scene.muscle_constant = bpy.props.FloatProperty(
         name="Muscle Constant",
         description="Muscle constant for force calculation (N/cm²)",
-        default=0.3,
+        default=30,
         min=0.0,
-        max=10.0,
+        max=50.0,
         precision=3,
-        step=0.01
+        step=1
     )
 
     # Connection mode for lofting: follow the curve path or directly connect origin->insertion
@@ -165,6 +205,47 @@ def register():
         description="Holds the last computed total volume for selected objects (m³)",
         default=0.0,
         precision=6
+    )
+    
+    # Density for mass calculation (user input) in g/cm³ (default 1.0597 g/cm³)
+    bpy.types.Scene.muscle_density_g_cm3 = bpy.props.FloatProperty(
+        name="Muscle Density (g/cm³)",
+        description="Density used to compute mass from volume (grams per cubic centimeter)",
+        default=1.0597,
+        min=0.0,
+        precision=4,
+        step=0.0001
+    )
+
+    # Store last computed total mass in kilograms (canonical)
+    bpy.types.Scene.advanced_selected_mass = bpy.props.FloatProperty(
+        name="Advanced Selected Mass",
+        description="Holds the last computed total mass for selected objects (kg)",
+        default=0.0,
+        precision=6
+    )
+
+    # Human readable PCSA per muscle (multiline string)
+    bpy.types.Scene.advanced_selected_pcsa = bpy.props.StringProperty(
+        name="Advanced Selected PCSA",
+        description="Display of PCSA per muscle (read-only)",
+        default="",
+        maxlen=4096
+    )
+
+    # Toggle to hide non-muscle objects in muscle subcollections (updates on change)
+    bpy.types.Scene.advanced_hide_non_muscle = bpy.props.BoolProperty(
+        name="Hide non-muscle objects",
+        description="When enabled, hides objects inside each muscle subcollection that are not the final '_muscle' mesh",
+        default=False,
+        update=update_hide_non_muscle
+    )
+
+    # Mirror duplicate axis property (used by Advanced UI)
+    bpy.types.Scene.myogenerator_mirror_axis = bpy.props.EnumProperty(
+        name="Mirror Axis",
+        items=[('X', 'X', 'Mirror across X'), ('Y', 'Y', 'Mirror across Y'), ('Z', 'Z', 'Mirror across Z')],
+        default='X'
     )
 
 
@@ -202,7 +283,14 @@ def unregister():
     bpy.utils.unregister_class(Muscle_Mesh_Generation_Op)
     bpy.utils.unregister_class(Muscle_Preview_Update_Op)
     bpy.utils.unregister_class(Muscle_Preview_Stop_Op)
-    bpy.utils.unregister_class(MYOGENERATOR_OT_estimate_selected_volumes)
+    # Unregister mirror operator if present
+    try:
+        from . import core_operators as _co
+        cls = getattr(_co, 'MYOGENERATOR_OT_mirror_duplicate', None)
+        if cls:
+            bpy.utils.unregister_class(cls)
+    except Exception as e:
+        print(f"MyoGenerator: failed to unregister mirror operator: {e}")
 
 
     del bpy.types.Scene.muscle_Name
@@ -219,33 +307,12 @@ def unregister():
     del bpy.types.Scene.insertion_reverse_orientation
     del bpy.types.Scene.muscle_connection_mode
     del bpy.types.Scene.advanced_selected_volume
+    del bpy.types.Scene.muscle_density_g_cm3
+    del bpy.types.Scene.advanced_selected_mass
+    del bpy.types.Scene.advanced_selected_pcsa
+
+    if hasattr(bpy.types.Scene, 'myogenerator_mirror_axis'):
+        del bpy.types.Scene.myogenerator_mirror_axis
 
 
-# Fallback operator for estimating volumes (ensures button exists regardless of core_operators import order)
-class MYOGENERATOR_OT_estimate_selected_volumes(bpy.types.Operator):
-    bl_idname = "myogenerator.estimate_selected_volumes"
-    bl_label = "Estimate Selected Volumes"
-    bl_description = "Estimate the total volume of selected mesh objects (fallback)"
 
-    def execute(self, context):
-        selected = [obj for obj in context.selected_objects if obj.type == 'MESH']
-        if not selected:
-            self.report({'WARNING'}, "No mesh objects selected")
-            context.scene.advanced_selected_volume = 0.0
-            return {'CANCELLED'}
-
-        total_volume = 0.0
-        for obj in selected:
-            try:
-                vol = calculate_muscle_volume(obj)
-                total_volume += vol
-            except Exception:
-                continue
-
-        try:
-            context.scene.advanced_selected_volume = float(total_volume)
-        except Exception:
-            context.scene.advanced_selected_volume = 0.0
-
-        self.report({'INFO'}, f"Estimated total volume: {total_volume:.6f} m³")
-        return {'FINISHED'}
