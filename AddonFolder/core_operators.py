@@ -3,200 +3,128 @@ Core operators for the MyoGeneratorRemix addon.
 Contains essential operators that support the old workflow interface.
 """
 
+import os
+
 import bpy
 import bmesh
-import csv
-import os
-from mathutils import Vector
-from .muscle_utilities import (select_and_edit_object, with_temp_object_active,
-                             calculate_mesh_area, calculate_mesh_centroid,
-                             calculate_curve_length, calculate_muscle_volume)
+
+from . import muscle_metrics, myo_record, volume_builder
+from .muscle_utilities import select_and_edit_object
 
 
 class Muscle_Name_Submition(bpy.types.Operator):
     """Submit muscle name and create collection"""
-    bl_idname = "view3d.submit_button"
+    bl_idname = "myogen.submit_muscle"
     bl_label = "Submit Muscle Name"
     bl_description = "Submit Muscle Name"
 
     def execute(self, context):
-        objName = bpy.context.scene.muscle_Name
+        objName = context.scene.myogen.muscle_name
+        muscles_collection = myo_record.get_root(create=True, scene=context.scene)
 
-        # Check if the "muscles" collection exists
-        if "muscles" not in bpy.data.collections:
-            # Create the "muscles" collection
-            muscles_collection = bpy.data.collections.new("muscles")
-            bpy.context.scene.collection.children.link(muscles_collection)
-        else:
-            muscles_collection = bpy.data.collections["muscles"]
-
-        # Check if a collection with the name objName already exists inside "muscles"
         if objName in muscles_collection.children:
-            self.report({'WARNING'}, f"Muscle '{objName}' already exists, choose a different name.")            
+            self.report({'WARNING'}, f"Muscle '{objName}' already exists, choose a different name.")
             return {'CANCELLED'}
-        else:
-            # Create a new collection inside "muscles" with the name objName
-            new_collection = bpy.data.collections.new(objName)
-            muscles_collection.children.link(new_collection)
+        if bpy.data.collections.get(objName) is not None:
+            self.report({'WARNING'}, f"A collection named '{objName}' already exists elsewhere in the file, "
+                                     "choose a different name.")
+            return {'CANCELLED'}
 
+        new_collection = bpy.data.collections.new(objName)
+        muscles_collection.children.link(new_collection)
+        new_collection["myo_schema"] = myo_record.SCHEMA_VERSION
+        new_collection["myo_name"] = objName
+        new_collection["myo_side"] = myo_record.parse_side(objName)
         return {'FINISHED'}
+
+
+def _owning_muscle_collection(obj):
+    """The MyoGen muscle collection an object belongs to, or None."""
+    root = myo_record.get_root()
+    if root is None:
+        return None
+    for col in obj.users_collection:
+        if root.children.get(col.name) is col:
+            return col
+    return None
 
 
 class Estimate_Selected_Volumes_Op(bpy.types.Operator):
     """Estimate summed volume of selected mesh objects"""
-    bl_idname = "view3d.estimate_selected_volumes"
+    bl_idname = "myogen.estimate_selected_volumes"
     bl_label = "Estimate Selected Volumes"
-    bl_description = "Estimate the total volume of all selected mesh objects and display the result"
+    bl_description = "Estimate the total volume, mass and PCSA of the selected mesh objects"
 
     def execute(self, context):
+        props = context.scene.myogen
         selected = [obj for obj in context.selected_objects if obj.type == 'MESH']
         if not selected:
             self.report({'WARNING'}, "No mesh objects selected")
-            context.scene.advanced_selected_volume = 0.0
-            context.scene.advanced_selected_mass = 0.0
-            context.scene.advanced_selected_pcsa = ""
+            props.advanced_selected_volume = 0.0
+            props.advanced_selected_mass = 0.0
+            props.advanced_selected_pcsa = ""
             return {'CANCELLED'}
 
-        total_volume = 0.0
-        per_muscle_info = []
+        mpu = myo_record.metres_per_unit(context.scene)
+        total_volume_m3 = 0.0
+        total_pcsa_m2 = 0.0
+        skipped = []
         for obj in selected:
-            try:
-                vol = calculate_muscle_volume(obj)
-                total_volume += vol
-                muscle_name = None
-                for col in obj.users_collection:
-                    if col.name != 'muscles' and col.name in bpy.data.collections:
-                        muscle_name = col.name
-                        break
-                if not muscle_name:
-                    muscle_name = obj.name.split('_')[0]
-                per_muscle_info.append((muscle_name, obj, vol))
-            except Exception:
+            vol_bu, _signed, _area, _c, _closed = myo_record.mesh_stats(obj)
+            vol_m3 = vol_bu * mpu ** 3
+            total_volume_m3 += vol_m3
+
+            coll = _owning_muscle_collection(obj)
+            path = myo_record.resolve_objects(coll).get("path") if coll else None
+            path_m = myo_record.curve_length(path) * mpu if path else 0.0
+            if path_m <= 0.0:
+                skipped.append(obj.name)
                 continue
+            pcsa_m2, _lf = myo_record.pcsa_from_volume(vol_m3, path_m, props.fiber_length_ratio,
+                                                       props.pennation_deg)
+            total_pcsa_m2 += pcsa_m2
 
-        # Convert from Blender units^3 to meters^3 using scene unit scale
-        try:
-            scale_length = float(getattr(context.scene.unit_settings, 'scale_length', 1.0)) or 1.0
-            total_volume_m3 = float(total_volume) * (scale_length ** 3)
-            context.scene.advanced_selected_volume = total_volume_m3
-        except Exception:
-            total_volume_m3 = 0.0
-            context.scene.advanced_selected_volume = 0.0
-
-        # Compute total mass using density (user input g/cm3 -> kg/m3)
-        try:
-            density_g_cm3 = float(getattr(context.scene, 'muscle_density_g_cm3', 1.0597))
-            density_kg_m3 = density_g_cm3 * 1000.0
-            total_mass_kg = total_volume_m3 * density_kg_m3
-            context.scene.advanced_selected_mass = total_mass_kg
-        except Exception:
-            density_g_cm3 = 0.0
-            density_kg_m3 = 0.0
-            total_mass_kg = 0.0
-            context.scene.advanced_selected_mass = 0.0
-
-        # Compute total PCSA sum (volume/length) in cm^2
-        total_pcsa_cm2 = 0.0
-        for muscle_name, obj, raw_vol in per_muscle_info:
-            try:
-                vol_m3 = float(raw_vol) * (scale_length ** 3)
-                curve_obj = None
-                muscles_collection = bpy.data.collections.get('muscles')
-                if muscles_collection and muscle_name in muscles_collection.children:
-                    muscle_col = muscles_collection.children[muscle_name]
-                    curve_obj = muscle_col.objects.get(f"{muscle_name}_curve")
-
-                fiber_length = None
-                if curve_obj:
-                    try:
-                        fiber_length = calculate_curve_length(curve_obj)
-                    except Exception:
-                        fiber_length = None
-
-                if not fiber_length or fiber_length == 0.0:
-                    # skip contribution
-                    continue
-                else:
-                    pcsa_m2 = vol_m3 / fiber_length
-                    pcsa_cm2 = pcsa_m2 * 1e4
-                    total_pcsa_cm2 += pcsa_cm2
-            except Exception:
-                continue
-
-        header = f"Total PCSA: {total_pcsa_cm2:.4f} cm²"
-        context.scene.advanced_selected_pcsa = header
-
+        props.advanced_selected_volume = total_volume_m3
+        props.advanced_selected_mass = total_volume_m3 * props.density_g_cm3 * 1000.0
+        text = f"Total PCSA: {total_pcsa_m2 * 1e4:.4f} cm²"
+        if skipped:
+            text += f" ({len(skipped)} without path curve skipped)"
+        props.advanced_selected_pcsa = text
         return {'FINISHED'}
 
 
-class MYOGENERATOR_OT_toggle_hide_non_muscles(bpy.types.Operator):
-    """Toggle hiding of non-final muscle objects inside each muscle subcollection"""
-    bl_idname = "myogenerator.toggle_hide_non_muscles"
-    bl_label = "Toggle Hide Non-Muscle Objects"
-    bl_description = "Hide or show objects inside each muscle subcollection that are not the final '_muscle' mesh"
+def _mirror_curve_data(curve, axis_idx):
+    for spline in curve.splines:
+        for p in spline.bezier_points:
+            for attr in ("co", "handle_left", "handle_right"):
+                v = getattr(p, attr).copy()
+                v[axis_idx] = -v[axis_idx]
+                setattr(p, attr, v)
+        for p in spline.points:
+            co = p.co.copy()
+            co[axis_idx] = -co[axis_idx]
+            p.co = co
 
-    def execute(self, context):
-        try:
-            muscles_collection = bpy.data.collections.get('muscles')
-            if not muscles_collection:
-                self.report({'WARNING'}, "No 'muscles' collection found")
-                return {'CANCELLED'}
 
-            # If the scene property exists, use it as target state; otherwise toggle
-            target = None
-            if hasattr(context.scene, 'advanced_hide_non_muscle'):
-                target = bool(context.scene.advanced_hide_non_muscle)
+_SIDE_SWAP = (("_left", "_right"), ("_right", "_left"), ("_l", "_r"), ("_r", "_l"))
 
-            # If no target provided, determine toggled state by inspecting first object
-            if target is None:
-                # Default: hide if any non-muscle is visible
-                should_hide = False
-                for muscle_col in muscles_collection.children:
-                    for obj in muscle_col.objects:
-                        if not obj.name.endswith('_muscle') and not obj.hide_get():
-                            should_hide = True
-                            break
-                    if should_hide:
-                        break
-                target = should_hide
 
-            for muscle_col in muscles_collection.children:
-                for obj in muscle_col.objects:
-                    is_muscle = obj.name.endswith('_muscle')
-                    if target and not is_muscle:
-                        try:
-                            obj.hide_viewport = True
-                        except Exception:
-                            pass
-                        try:
-                            obj.hide_set(True)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            obj.hide_viewport = False
-                        except Exception:
-                            pass
-                        try:
-                            obj.hide_set(False)
-                        except Exception:
-                            pass
-
-            # Ensure scene property reflects the applied state
-            if hasattr(context.scene, 'advanced_hide_non_muscle'):
-                context.scene.advanced_hide_non_muscle = bool(target)
-
-            return {'FINISHED'}
-        except Exception as e:
-            self.report({'ERROR'}, f"Failed to toggle hide: {e}")
-            return {'CANCELLED'}
+def _swap_side(name):
+    """'temp_sup_left' -> 'temp_sup_right' (None if the name has no side suffix)."""
+    low = name.lower()
+    for a, b in _SIDE_SWAP:
+        if low.endswith(a):
+            return name[: -len(a)] + b
+    return None
 
 
 class MYOGENERATOR_OT_mirror_duplicate(bpy.types.Operator):
     """Duplicate selected objects mirrored across chosen axis (X/Y/Z)"""
-    bl_idname = "myogenerator.mirror_duplicate"
+    bl_idname = "myogen.mirror_duplicate"
     bl_label = "Mirror Duplicate"
-    bl_description = "Duplicate selected objects mirrored across the chosen axis"
+    bl_description = ("Duplicate the selected objects mirrored across the chosen axis. Objects of a "
+                      "muscle named *_left/*_right go to the opposite-side muscle collection, "
+                      "which is created if needed")
 
     axis: bpy.props.EnumProperty(
         name="Axis",
@@ -204,6 +132,23 @@ class MYOGENERATOR_OT_mirror_duplicate(bpy.types.Operator):
         items=[('X', 'X', ''), ('Y', 'Y', ''), ('Z', 'Z', '')],
         default='X'
     )
+
+    def _target_collections(self, context, obj):
+        """(collections to link the copy to, new object name)."""
+        src = _owning_muscle_collection(obj)
+        other = _swap_side(src.name) if src else None
+        if not other:
+            return list(obj.users_collection), obj.name + "_mirror"
+        root = myo_record.get_root(create=True, scene=context.scene)
+        dst = root.children.get(other)
+        if dst is None:
+            dst = bpy.data.collections.new(other)
+            root.children.link(dst)
+            dst["myo_schema"] = myo_record.SCHEMA_VERSION
+            dst["myo_name"] = other
+            dst["myo_side"] = myo_record.parse_side(other)
+        new_name = other + obj.name[len(src.name):] if obj.name.startswith(src.name) else obj.name + "_mirror"
+        return [dst], new_name
 
     def execute(self, context):
         sel = [o for o in context.selected_objects if o is not None]
@@ -213,151 +158,94 @@ class MYOGENERATOR_OT_mirror_duplicate(bpy.types.Operator):
 
         axis_idx = {'X': 0, 'Y': 1, 'Z': 2}.get(self.axis, 0)
         created = []
-
-        # Deselect originals and keep them for reference
-        try:
-            for o in sel:
-                o.select_set(False)
-        except Exception:
-            pass
+        for o in sel:
+            o.select_set(False)
 
         for obj in sel:
-            try:
-
-                new_obj = obj.copy()
-                # Try to copy object data (for meshes/curves). We'll mirror vertex coords
-                # on the duplicated mesh data instead of flipping object scale to avoid
-                # negative scale and sculpt warnings.
-                if obj.data is not None:
-                    try:
-                        new_mesh = obj.data.copy()
-                        # If this is a mesh, mirror its vertex coordinates along axis
-                        if hasattr(new_mesh, 'vertices'):
-                            try:
-                                import bmesh
-                                # Use bmesh for proper mesh mirroring with correct normals
-                                bm = bmesh.new()
-                                bm.from_mesh(new_mesh)
-                                
-                                # Mirror vertices along the specified axis
-                                for vert in bm.verts:
-                                    vert.co[axis_idx] = -vert.co[axis_idx]
-                                
-                                # Flip face normals to correct orientation after mirroring
-                                bmesh.ops.reverse_faces(bm, faces=bm.faces)
-                                
-                                # Recalculate normals
-                                bm.normal_update()
-                                bm.faces.ensure_lookup_table()
-                                
-                                # Update the mesh
-                                bm.to_mesh(new_mesh)
-                                bm.free()
-                                
-                                try:
-                                    new_mesh.update()
-                                except Exception:
-                                    pass
-                            except Exception:
-                                # if bmesh manipulation fails, fall back to simple vertex mirroring
-                                try:
-                                    for v in new_mesh.vertices:
-                                        v.co[axis_idx] = -v.co[axis_idx]
-                                    new_mesh.update()
-                                    new_mesh.calc_normals()
-                                except Exception:
-                                    pass
-                        new_obj.data = new_mesh
-                    except Exception:
-                        # fallback: keep shared data (less ideal)
-                        new_obj.data = obj.data
-
-                # Link to same collections as source
-                for col in obj.users_collection:
-                    try:
-                        col.objects.link(new_obj)
-                    except Exception:
-                        pass
-
-                # Mirror location only (negate chosen component) but keep scale identical
-                try:
-                    loc = obj.location.copy()
-                    loc[axis_idx] = -loc[axis_idx]
-                    new_obj.location = loc
-                except Exception:
-                    # fallback: try to mirror using matrix_world translation component
-                    try:
-                        mw = obj.matrix_world.copy()
-                        mw[axis_idx][3] = -mw[axis_idx][3]
-                        new_obj.matrix_world = mw
-                    except Exception:
-                        pass
-
-                try:
-                    new_obj.scale = obj.scale.copy()
-                except Exception:
-                    pass
-
-                try:
-                    new_obj.rotation_euler = obj.rotation_euler.copy()
-                except Exception:
-                    try:
-                        new_obj.rotation_quaternion = obj.rotation_quaternion.copy()
-                    except Exception:
-                        pass
-
-                new_obj.select_set(True)
-                created.append(new_obj)
-            except Exception as e:
-                self.report({'WARNING'}, f"Failed to mirror object '{obj.name}': {e}")
+            collections, new_name = self._target_collections(context, obj)
+            if any(c.objects.get(new_name) for c in collections):
+                self.report({'WARNING'}, f"'{new_name}' already exists: '{obj.name}' not mirrored")
                 continue
 
-        # Set active to last created
+            new_obj = obj.copy()
+            new_obj.name = new_name
+            if obj.data is not None:
+                data = obj.data.copy()
+                if isinstance(data, bpy.types.Mesh):
+                    bm = bmesh.new()
+                    bm.from_mesh(data)
+                    for vert in bm.verts:
+                        vert.co[axis_idx] = -vert.co[axis_idx]
+                    # Mirroring flips the winding; reverse faces to keep normals outward.
+                    bmesh.ops.reverse_faces(bm, faces=bm.faces)
+                    bm.normal_update()
+                    bm.to_mesh(data)
+                    bm.free()
+                    data.update()
+                elif isinstance(data, bpy.types.Curve):
+                    _mirror_curve_data(data, axis_idx)
+                new_obj.data = data
+
+            for col in collections:
+                col.objects.link(new_obj)
+
+            loc = obj.location.copy()
+            loc[axis_idx] = -loc[axis_idx]
+            new_obj.location = loc
+            new_obj.select_set(True)
+            created.append(new_obj)
+
         if created:
             context.view_layer.objects.active = created[-1]
-
         self.report({'INFO'}, f"Created {len(created)} mirrored objects")
         return {'FINISHED'}
 
 
 class Select_Origin_Op(bpy.types.Operator):
     """Select origin faces"""
-    bl_idname = "view3d.select_origin"
+    bl_idname = "myogen.select_origin"
     bl_label = "Select Origin"
     bl_description = "Select Origin of the muscle"
 
     def execute(self, context):
-        # Get the selected object in origin object
-        origin_object = bpy.context.scene.origin_object
-        select_and_edit_object(origin_object)
+        select_and_edit_object(context.scene.myogen.origin_object)
         return {'FINISHED'}
 
 
 class Select_Insertion_Op(bpy.types.Operator):
     """Select insertion faces"""
-    bl_idname = "view3d.select_insertion"
+    bl_idname = "myogen.select_insertion"
     bl_label = "Select Insertion"
     bl_description = "Select Insertion of the muscle"
 
     def execute(self, context):
-        # Get the selected object in insertion object
-        insertion_object = bpy.context.scene.insertion_object
-        select_and_edit_object(insertion_object)
+        select_and_edit_object(context.scene.myogen.insertion_object)
         return {'FINISHED'}
 
 
 def create_mesh_from_selected_faces(operator, mesh_name):
-    """Create a mesh from selected faces and generate contour curve"""
+    """Turn the faces selected on a bone into an attachment surface and its contour.
+
+    Creates ``<M>_<mesh_name>`` (the faces, world space, ``myo_role`` =
+    ``mesh_name``) and ``<M>_<mesh_name>_contour`` (its boundary as a closed
+    curve, role ``<mesh_name>_contour``) inside ``muscles/<M>``, where ``M`` is
+    ``scene.myogen.muscle_name``.
+
+    :arg operator: Calling operator (for reports).
+    :type operator: :class:`bpy.types.Operator`
+    :arg mesh_name: ``'origin'`` or ``'insertion'``.
+    :type mesh_name: str
+    """
     # Get active object
     obj = bpy.context.active_object
     if not obj or obj.type != 'MESH':
         operator.report({'ERROR'}, "No active mesh object")
         return
     
-    muscle_name = bpy.context.scene.muscle_Name
-    
+    muscle_name = bpy.context.scene.myogen.muscle_name
+
     # Get or create muscle collection
-    muscles_collection = bpy.data.collections.get("muscles")
+    muscles_collection = myo_record.get_root()
     if not muscles_collection:
         operator.report({'ERROR'}, "Muscles collection not found")
         return
@@ -393,14 +281,15 @@ def create_mesh_from_selected_faces(operator, mesh_name):
     # Create a new BMesh for the new object
     new_bm = bmesh.new()
     
-    # Copy selected faces to the new BMesh with world coordinates
+    # Copy selected faces to the new BMesh with world coordinates, sharing
+    # vertices between faces (a connected surface with a real boundary).
+    vert_map = {}
     for face in selected_faces:
-        # Transform vertices to world coordinates
         world_verts = []
         for vert in face.verts:
-            world_co = obj.matrix_world @ vert.co
-            world_verts.append(new_bm.verts.new(world_co))
-        
+            if vert.index not in vert_map:
+                vert_map[vert.index] = new_bm.verts.new(obj.matrix_world @ vert.co)
+            world_verts.append(vert_map[vert.index])
         new_face = new_bm.faces.new(world_verts)
         new_face.normal_update()
     
@@ -410,6 +299,7 @@ def create_mesh_from_selected_faces(operator, mesh_name):
     
     # Add the new object to the target collection
     target_collection.objects.link(new_object)
+    new_object[myo_record.ROLE_KEY] = mesh_name
     
     # Switch back to object mode
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -425,6 +315,7 @@ def create_mesh_from_selected_faces(operator, mesh_name):
     # Get the duplicated object (should be the active object now)
     contour_object = bpy.context.active_object
     contour_object.name = f"{muscle_name}_{mesh_name}_contour"
+    contour_object[myo_record.ROLE_KEY] = f"{mesh_name}_contour"
     
     # Move contour to target collection
     for collection in contour_object.users_collection:
@@ -495,6 +386,7 @@ def create_mesh_from_selected_faces(operator, mesh_name):
         # Make sure the curve is cyclic (closed)
         if hasattr(contour_object.data, 'splines') and len(contour_object.data.splines) > 0:
             contour_object.data.splines[0].use_cyclic_u = True
+        contour_object[myo_record.ROLE_KEY] = f"{mesh_name}_contour"
     else:
         # If no boundary object found, something went wrong
         operator.report({'WARNING'}, "Could not extract boundary loop properly")
@@ -508,7 +400,7 @@ def create_mesh_from_selected_faces(operator, mesh_name):
 
 class Submit_Origin_Op(bpy.types.Operator):
     """Submit origin selection"""
-    bl_idname = "view3d.submit_origin"
+    bl_idname = "myogen.submit_origin"
     bl_label = "Submit Origin"
     bl_description = "Submit Origin of the muscle"
 
@@ -523,7 +415,7 @@ class Submit_Origin_Op(bpy.types.Operator):
 
 class Submit_Insertion_Op(bpy.types.Operator):
     """Submit insertion selection"""
-    bl_idname = "view3d.submit_insertion"
+    bl_idname = "myogen.submit_insertion"
     bl_label = "Submit Insertion"
     bl_description = "Submit Insertion of the muscle"
 
@@ -536,172 +428,165 @@ class Submit_Insertion_Op(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class Select_Fossa_Op(bpy.types.Operator):
+    """Select the fossa the muscle fills on the origin bone (optional)"""
+    bl_idname = "myogen.select_fossa"
+    bl_label = "Select Fossa"
+    bl_description = ("Optional, for Fill fossa: enter Edit Mode on the origin bone to select the whole region "
+                      "the muscle covers, up to the crests and the zygomatic arch; then Submit Fossa")
+
+    def execute(self, context):
+        select_and_edit_object(context.scene.myogen.origin_object)
+        return {'FINISHED'}
+
+
+class Submit_Fossa_Op(bpy.types.Operator):
+    """Store the selected faces as the fossa the muscle fills"""
+    bl_idname = "myogen.submit_fossa"
+    bl_label = "Submit Fossa"
+    bl_description = "Store the selected faces as <muscle>_fossa: Fill fossa then uses it instead of the reach"
+
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None and context.object.mode == 'EDIT'
+
+    def execute(self, context):
+        name = context.scene.myogen.muscle_name
+        _remove_objects((f"{name}_fossa", f"{name}_fossa_contour"))
+        create_mesh_from_selected_faces(self, "fossa")
+        _remove_objects((f"{name}_fossa_contour",))           # only the surface is needed
+        fossa = bpy.data.objects.get(f"{name}_fossa")
+        if fossa is not None:
+            fossa.hide_set(True)
+        volume_builder.schedule_rebuild(context)
+        return {'FINISHED'}
+
+
+class Remove_Fossa_Op(bpy.types.Operator):
+    """Forget the submitted fossa and use the reach again"""
+    bl_idname = "myogen.remove_fossa"
+    bl_label = "Remove Fossa"
+    bl_description = "Delete <muscle>_fossa; Fill fossa then uses the reach around the origin"
+
+    def execute(self, context):
+        _remove_objects((f"{context.scene.myogen.muscle_name}_fossa",))
+        volume_builder.schedule_rebuild(context)
+        return {'FINISHED'}
+
+
+def _remove_objects(names):
+    for name in names:
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            data = obj.data
+            bpy.data.objects.remove(obj, do_unlink=True)
+            if data is not None and data.users == 0:
+                if isinstance(data, bpy.types.Mesh):
+                    bpy.data.meshes.remove(data)
+                elif isinstance(data, bpy.types.Curve):
+                    bpy.data.curves.remove(data)
+
+
 class Next_Muscle_Op(bpy.types.Operator):
     """Move to next muscle"""
-    bl_idname = "view3d.next_muscle"
+    bl_idname = "myogen.next_muscle"
     bl_label = "Next Muscle"
     bl_description = "Start the creation of the next muscle"
 
     def execute(self, context):
-        # Clean the muscle name from the muscle panel
-        bpy.context.scene.muscle_Name = "Insert muscle name"
-        # Change to object mode
-        bpy.ops.object.mode_set(mode='OBJECT')
-        # Deselect all objects
+        context.scene.myogen.muscle_name = "Insert muscle name"
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.select_all(action='DESELECT')
+        return {'FINISHED'}
+
+
+def _report_findings(operator, rows, scene_findings):
+    worst = myo_record.worst_level(scene_findings + [f for r in rows for f in r["qa"]])
+    errors = [m for lvl, m in scene_findings if lvl == myo_record.QA_ERROR]
+    if errors:
+        operator.report({'WARNING'}, errors[0])
+    flagged = [r["collection"] for r in rows if myo_record.worst_level(r["qa"]) in
+               (myo_record.QA_WARNING, myo_record.QA_ERROR)]
+    if flagged:
+        operator.report({'WARNING'}, f"Check {len(flagged)} muscle(s) in the QA box: {', '.join(flagged)}")
+    return worst
+
+
+class Check_Muscles_Op(bpy.types.Operator):
+    """Run the plausibility checks without exporting"""
+    bl_idname = "myogen.check_muscles"
+    bl_label = "Check Muscles"
+    bl_description = ("Measure every muscle, store the results in the muscle records and flag "
+                      "implausible scales, volumes, lengths or parameters")
+
+    def execute(self, context):
+        rows, scene_findings = muscle_metrics.compute_muscles(context, write=True)
+        if not rows:
+            self.report({'WARNING'}, "No MyoGen muscles found in the 'muscles' collection")
+            return {'CANCELLED'}
+        worst = _report_findings(self, rows, scene_findings)
+        if worst in (myo_record.QA_OK, myo_record.QA_INFO):
+            self.report({'INFO'}, f"{len(rows)} muscles checked, nothing suspicious")
+        return {'FINISHED'}
+
+
+class Set_Unit_Scale_Op(bpy.types.Operator):
+    """Set the scene unit scale"""
+    bl_idname = "myogen.set_unit_scale"
+    bl_label = "Set Unit Scale"
+    bl_description = "Declare what one Blender unit is in the real specimen"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    unit: bpy.props.EnumProperty(
+        name="1 Blender unit =",
+        description="Real length of one Blender unit in the specimen model",
+        items=[('MILLIMETERS', "1 mm", "Model built in millimetres (Unit Scale 0.001)"),
+               ('CENTIMETERS', "1 cm", "Model built in centimetres (Unit Scale 0.01)"),
+               ('METERS', "1 m", "Model built in metres (Unit Scale 1.0)")],
+        default='MILLIMETERS')
+
+    def execute(self, context):
+        us = context.scene.unit_settings
+        us.system = 'METRIC'
+        us.scale_length = {'MILLIMETERS': 0.001, 'CENTIMETERS': 0.01, 'METERS': 1.0}[self.unit]
+        us.length_unit = self.unit
+        self.report({'INFO'}, f"Unit Scale set to {us.scale_length:g} (1 BU = {self.unit.lower()[:-1]})")
         return {'FINISHED'}
 
 
 class Calculate_Muscle_Parameters_Op(bpy.types.Operator):
     """Calculate muscle parameters and save to CSV"""
-    bl_idname = "view3d.calculate_muscle_parameters"
+    bl_idname = "myogen.calculate_muscle_parameters"
     bl_label = "Calculate Muscle Parameters"
-    bl_description = "Calculate muscle parameters and save to CSV file"
+    bl_description = ("Measure every muscle (volume, mass, lengths, areas, PCSA, force), store the "
+                      "muscle records in the .blend and export them to CSV")
 
     def execute(self, context):
-        # Get file path and name
-        folder_path = context.scene.conf_path
-        file_name = context.scene.file_name
-        
+        props = context.scene.myogen
+        folder_path, file_name = props.conf_path, props.file_name
         if not folder_path or not file_name:
             self.report({'ERROR'}, "Please specify folder path and file name")
             return {'CANCELLED'}
-        
-        # Handle Blender's relative path notation
-        if folder_path.startswith("//"):
-            # Convert Blender relative path to absolute path
-            folder_path = bpy.path.abspath(folder_path)
-        
-        # Ensure the directory exists, create if it doesn't
+        folder_path = bpy.path.abspath(folder_path)
         try:
             os.makedirs(folder_path, exist_ok=True)
         except OSError as e:
-            self.report({'ERROR'}, f"Cannot create directory '{folder_path}': {str(e)}")
+            self.report({'ERROR'}, f"Cannot create directory '{folder_path}': {e}")
             return {'CANCELLED'}
-        
         csv_path = os.path.join(folder_path, file_name + ".csv")
-        
-        # Get muscles collection
-        muscles_collection = bpy.data.collections.get("muscles")
-        if not muscles_collection:
-            self.report({'ERROR'}, "No muscles collection found")
+
+        rows, scene_findings = muscle_metrics.compute_muscles(context, write=True)
+        if not rows:
+            self.report({'ERROR'}, "No MyoGen muscles found in the 'muscles' collection")
             return {'CANCELLED'}
-        
-        # Calculate parameters for each muscle
-        muscle_data = []
-        muscle_constant = context.scene.muscle_constant  # Get user-defined muscle constant
-        
-        for muscle_collection in muscles_collection.children:
-            muscle_name = muscle_collection.name
-            
-            # Get muscle objects
-            muscle_obj = muscle_collection.objects.get(f"{muscle_name}_muscle")
-            origin_obj = muscle_collection.objects.get(f"{muscle_name}_origin") 
-            insertion_obj = muscle_collection.objects.get(f"{muscle_name}_insertion")
-            curve_obj = muscle_collection.objects.get(f"{muscle_name}_curve")
-            
-            if muscle_obj and muscle_obj.type == 'MESH':
-                # Calculate raw measurements (in blender units)
-                volume_raw = calculate_muscle_volume(muscle_obj)
 
-                # Calculate fiber length (raw blender units)
-                fiber_length_raw = 0.0
-                if curve_obj:
-                    fiber_length_raw = calculate_curve_length(curve_obj)
-
-                # Calculate origin area and centroid (raw blender units)
-                origin_area_raw = 0.0
-                origin_centroid = Vector((0, 0, 0))
-                if origin_obj:
-                    origin_area_raw = calculate_mesh_area(origin_obj)
-                    origin_centroid = calculate_mesh_centroid(origin_obj)
-
-                # Calculate insertion area and centroid (raw blender units)
-                insertion_area_raw = 0.0
-                insertion_centroid = Vector((0, 0, 0))
-                if insertion_obj:
-                    insertion_area_raw = calculate_mesh_area(insertion_obj)
-                    insertion_centroid = calculate_mesh_centroid(insertion_obj)
-
-                # Convert raw blender units to meters using scene unit scale
-                scale_length = float(getattr(context.scene.unit_settings, 'scale_length', 1.0)) or 1.0
-                # Determine display unit length in meters (e.g., cm -> 0.01)
-                unit_len_attr = getattr(context.scene.unit_settings, 'length_unit', None)
-                unit_meter = 1.0
-                if unit_len_attr:
-                    ul = str(unit_len_attr).upper()
-                    if 'MILLIM' in ul or 'MM' == ul:
-                        unit_meter = 0.001
-                    elif 'CENTIM' in ul or 'CM' == ul:
-                        unit_meter = 0.01
-                    elif 'INCH' in ul or 'IN' == ul:
-                        unit_meter = 0.0254
-                    elif 'FOOT' in ul or 'FT' == ul:
-                        unit_meter = 0.3048
-                    else:
-                        unit_meter = 1.0
-
-                # Convert raw->meters
-                volume_m3 = float(volume_raw) * (scale_length ** 3)
-                fiber_length_m = float(fiber_length_raw) * scale_length
-                origin_area_m2 = float(origin_area_raw) * (scale_length ** 2)
-                insertion_area_m2 = float(insertion_area_raw) * (scale_length ** 2)
-
-                # Convert to display units
-                display_volume = volume_m3 / (unit_meter ** 3)
-                display_fiber_length = fiber_length_m / unit_meter
-                display_origin_area = origin_area_m2 / (unit_meter ** 2)
-                display_insertion_area = insertion_area_m2 / (unit_meter ** 2)
-
-                # Calculate PCSA in m^2 and convert to display area units
-                pcsa_m2 = 0.0
-                if fiber_length_m > 0.0:
-                    pcsa_m2 = volume_m3 / fiber_length_m
-                display_pcsa = pcsa_m2 / (unit_meter ** 2)
-
-                # For force, muscle_constant is N/cm² per UI -- convert PCSA to cm²
-                pcsa_cm2 = pcsa_m2 * 1e4
-                force = pcsa_cm2 * muscle_constant
-
-                # linear length between centroids (in meters -> display units)
-                linear_length_m = (insertion_centroid - origin_centroid).length * scale_length
-                linear_length_display = linear_length_m / unit_meter
-
-                muscle_data.append({
-                    'name': muscle_name,
-                    'volume': display_volume,
-                    'fiber_length': display_fiber_length,
-                    'origin_area': display_origin_area,
-                    'insertion_area': display_insertion_area,
-                    'origin_centroid': f"({origin_centroid.x:.4f}, {origin_centroid.y:.4f}, {origin_centroid.z:.4f})",
-                    'insertion_centroid': f"({insertion_centroid.x:.4f}, {insertion_centroid.y:.4f}, {insertion_centroid.z:.4f})",
-                    'linear_length': linear_length_display,
-                    'pcsa': display_pcsa,
-                    'force': force
-                })
-        
-        # Write to CSV (create new file or overwrite existing)
         try:
-            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = [
-                    'name', 'volume', 'fiber_length', 'origin_area', 'insertion_area',
-                    'origin_centroid', 'insertion_centroid', 'linear_length', 
-                    'pcsa', 'force'
-                ]
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in muscle_data:
-                    writer.writerow(row)
-            
-            self.report({'INFO'}, f"Muscle parameters saved to {csv_path}")
-        except PermissionError:
-            self.report({'ERROR'}, f"Permission denied. Cannot write to '{csv_path}'. Check file permissions.")
+            muscle_metrics.write_csv(csv_path, rows)
+        except OSError as e:
+            self.report({'ERROR'}, f"Failed to save CSV '{csv_path}': {e}")
             return {'CANCELLED'}
-        except FileNotFoundError:
-            self.report({'ERROR'}, f"Directory not found: '{folder_path}'. Please select a valid directory.")
-            return {'CANCELLED'}
-        except Exception as e:
-            self.report({'ERROR'}, f"Failed to save CSV: {str(e)}")
-            return {'CANCELLED'}
-        
+
+        _report_findings(self, rows, scene_findings)
+        self.report({'INFO'}, f"Muscle parameters of {len(rows)} muscles saved to {csv_path}")
         return {'FINISHED'}

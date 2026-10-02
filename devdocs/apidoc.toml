@@ -1,0 +1,5 @@
+# Configuration of tools/gen_api_docs.py
+name = "MyoGeneratorRemix"
+package = "AddonFolder"
+out = "devdocs/reference"
+exclude = []

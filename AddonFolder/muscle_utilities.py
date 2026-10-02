@@ -1,10 +1,18 @@
+"""Selection helpers and contour alignment used while reconstructing a muscle.
+
+Measurements (volume, lengths, areas) live in :mod:`myo_record` and
+:mod:`muscle_metrics`.
+"""
 import bpy
-import bmesh
 from mathutils import Vector
 
+
 def select_and_edit_object(obj):
-    """
-    Set up an object for face selection in edit mode
+    """Make a bone the only selected, active object and enter Edit Mode with face
+    selection and the lasso tool, ready to paint an attachment area.
+
+    :arg obj: Bone mesh (anything else is ignored).
+    :type obj: :class:`bpy.types.Object`
     """
     # Ensure we have a valid context for operations
     if not obj or obj.type != 'MESH':
@@ -59,12 +67,15 @@ def select_and_edit_object(obj):
             pass
 
 def with_temp_object_active(context, obj, action):
-    """
-    Helper function to:
-      1. Store the current active object and mode
-      2. Set 'obj' as active, switch to OBJECT mode
-      3. Run 'action' callback
-      4. Restore original active object and mode
+    """Run ``action`` with ``obj`` active in Object Mode, then restore the previous
+    active object and mode.
+
+    :arg context: Context.
+    :type context: :class:`bpy.types.Context`
+    :arg obj: Object to make active.
+    :type obj: :class:`bpy.types.Object`
+    :arg action: Callable without arguments.
+    :type action: callable
     """
     if not obj:
         return
@@ -102,114 +113,33 @@ def with_temp_object_active(context, obj, action):
             print("Couldn't restore previous mode (possibly invalid).")
 
 
-def update_mesh_density(self, context):
-    """Update mesh density in real-time if preview is active"""
-    # Trigger update during preview mode
-    if hasattr(context.scene, 'muscle_preview_active') and context.scene.muscle_preview_active:
-        # Force immediate update by triggering redraw for all 3D viewports
-        for window in context.window_manager.windows:
-            for area in window.screen.areas:
-                if area.type == 'VIEW_3D':
-                    area.tag_redraw()
-        
-        # Force scene update
-        context.view_layer.update()
 
 
-def calculate_mesh_area(mesh_obj):
-    """Calculate the surface area of a mesh object"""
-    if not mesh_obj or mesh_obj.type != 'MESH':
-        return 0.0
-    
-    # Create bmesh instance from mesh
-    bm = bmesh.new()
-    bm.from_mesh(mesh_obj.data)
-    
-    # Apply object's world transform
-    bm.transform(mesh_obj.matrix_world)
-    
-    # Calculate total area
-    total_area = 0.0
-    for face in bm.faces:
-        total_area += face.calc_area()
-    
-    bm.free()
-    return total_area
 
 
-def calculate_mesh_centroid(mesh_obj):
-    """Calculate the centroid (center of mass) of a mesh object"""
-    if not mesh_obj or mesh_obj.type != 'MESH':
-        return Vector((0, 0, 0))
-    
-    # Get vertices in world coordinates
-    vertices = []
-    for vertex in mesh_obj.data.vertices:
-        world_vertex = mesh_obj.matrix_world @ vertex.co
-        vertices.append(world_vertex)
-    
-    if not vertices:
-        return Vector((0, 0, 0))
-    
-    # Calculate centroid as average of all vertices
-    centroid = sum(vertices, Vector()) / len(vertices)
-    return centroid
 
 
-def calculate_curve_length(curve_obj):
-    """Calculate the total length of a curve object"""
-    if not curve_obj or curve_obj.type != 'CURVE':
-        return 0.0
-    
-    total_length = 0.0
-    
-    for spline in curve_obj.data.splines:
-        if spline.type in ['NURBS', 'POLY']:
-            # For NURBS and POLY splines, calculate distance between consecutive points
-            points = [curve_obj.matrix_world @ Vector(point.co[:3]) for point in spline.points]
-        elif spline.type == 'BEZIER':
-            # For Bezier splines, use bezier points
-            points = [curve_obj.matrix_world @ point.co for point in spline.bezier_points]
-        else:
-            continue
-        
-        # Calculate length by summing distances between consecutive points
-        for i in range(1, len(points)):
-            segment_length = (points[i] - points[i-1]).length
-            total_length += segment_length
-    
-    return total_length
 
 
-def calculate_muscle_volume(muscle_obj):
-    """Calculate the volume of a muscle mesh object"""
-    if not muscle_obj or muscle_obj.type != 'MESH':
-        return 0.0
-    
-    # Create bmesh instance from mesh
-    bm = bmesh.new()
-    bm.from_mesh(muscle_obj.data)
-    
-    # Apply object's world transform
-    bm.transform(muscle_obj.matrix_world)
-    
-    # Calculate volume
-    volume = bm.calc_volume()
-    bm.free()
-    
-    return abs(volume)  # Use absolute value in case of inverted normals
 
 
 def get_contour_direction_vector(contour_obj, reference_point):
-    """
-    Calculate the direction vector of a contour relative to a reference point
-    Returns a vector indicating the general direction of vertex flow
+    """Circulation direction of a contour loop relative to a reference point.
+
+    :arg contour_obj: Contour curve (first spline used).
+    :type contour_obj: :class:`bpy.types.Object`
+    :arg reference_point: Point the contour faces (e.g. the other contour's centroid).
+    :type reference_point: :class:`mathutils.Vector`
+    :return: ``(flow_vector, alignment)``: unit circulation axis and its dot product
+       with the direction to ``reference_point``; ``(zero vector, 0.0)`` for invalid
+       contours.
+    :rtype: tuple of (:class:`mathutils.Vector`, float)
     """
     if not contour_obj or contour_obj.type != 'CURVE':
-        return Vector((0, 0, 0))
+        return Vector((0, 0, 0)), 0.0
     
     if not contour_obj.data.splines:
-        return Vector((0, 0, 0))
+        return Vector((0, 0, 0)), 0.0
     
     spline = contour_obj.data.splines[0]
     
@@ -219,10 +149,10 @@ def get_contour_direction_vector(contour_obj, reference_point):
     elif spline.type == 'BEZIER':
         points = [contour_obj.matrix_world @ point.co for point in spline.bezier_points]
     else:
-        return Vector((0, 0, 0))
+        return Vector((0, 0, 0)), 0.0
     
     if len(points) < 3:
-        return Vector((0, 0, 0))
+        return Vector((0, 0, 0)), 0.0
     
     # Calculate the centroid of the contour
     contour_centroid = sum(points, Vector()) / len(points)
@@ -257,9 +187,15 @@ def get_contour_direction_vector(contour_obj, reference_point):
 
 
 def align_contour_directions(origin_contour, insertion_contour):
-    """
-    Align the direction of contours so they both circulate in compatible directions
-    for proper lofting without twisted geometry
+    """Make origin and insertion contours circulate in compatible directions so the
+    loft does not twist (reverses the insertion contour if needed).
+
+    :arg origin_contour: Origin contour curve.
+    :type origin_contour: :class:`bpy.types.Object`
+    :arg insertion_contour: Insertion contour curve (may be modified).
+    :type insertion_contour: :class:`bpy.types.Object`
+    :return: True if the contours are (now) aligned.
+    :rtype: bool
     """
     if not (origin_contour and insertion_contour):
         return False
@@ -288,7 +224,13 @@ def align_contour_directions(origin_contour, insertion_contour):
 
 
 def calculate_curve_centroid(curve_obj):
-    """Calculate the centroid of a curve object"""
+    """Mean of the control points of a curve, world space.
+
+    :arg curve_obj: Curve object.
+    :type curve_obj: :class:`bpy.types.Object`
+    :return: Centroid; zero vector for invalid curves.
+    :rtype: :class:`mathutils.Vector`
+    """
     if not curve_obj or curve_obj.type != 'CURVE':
         return Vector((0, 0, 0))
     
@@ -310,8 +252,12 @@ def calculate_curve_centroid(curve_obj):
 
 
 def reverse_contour_direction(contour_obj):
-    """
-    Reverse the direction of vertices in a contour curve
+    """Reverse the point order of a contour's first spline (handles swapped for Bezier).
+
+    :arg contour_obj: Contour curve (modified in place).
+    :type contour_obj: :class:`bpy.types.Object`
+    :return: True on success.
+    :rtype: bool
     """
     if not contour_obj or contour_obj.type != 'CURVE':
         return False

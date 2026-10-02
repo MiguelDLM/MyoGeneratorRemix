@@ -91,14 +91,20 @@ MyoGeneratorRemix is a completely redesigned version of the original MyoGenerato
 
 The add-on generates:
 - **Muscle Mesh**: High-quality volumetric muscle geometry
-- **CSV Metrics**: Comprehensive measurements including:
-  - Muscle volume and surface area
-  - Origin and insertion areas
-  - Centroid coordinates
-  - Linear distance (Euclidean distance between centroids)
-  - Fiber length (actual muscle path length)
-  - Physiological Cross-Sectional Area (average area along the muscle path)
-  - Muscle Force (calculated based on PCSA multiplied by a constant factor, e.g., 0.3 N/mm²)
+- **Muscle records** stored in the `.blend` (one per muscle collection), readable by
+  other tools such as MUFIS without this add-on installed
+  (see [devdocs/MUSCLE_RECORD.md](devdocs/MUSCLE_RECORD.md))
+- **CSV Metrics** (fixed units, stated in the column names):
+  - Volume (cm³) and mass (g, from the muscle density)
+  - Path length (evaluated length of the muscle curve), fibre length and straight
+    origin-insertion distance (cm)
+  - Origin and insertion areas (cm²) and centroids
+  - PCSA (cm²) = volume × cos(pennation) / fibre length, with fibre length =
+    path length × fibre/muscle ratio. The defaults (ratio 1, 0°) reproduce
+    Herbst et al. (2022): fibres as long as the muscle, parallel, no tendon
+  - Force (N) = PCSA × specific tension (default 30 N/cm² = 0.3 N/mm²)
+  - `qa`: plausibility findings (scale, holes in the mesh, unusual lengths or sizes,
+    left/right differences, parameters out of the usual ranges)
 
 ## Organization
 
@@ -138,6 +144,13 @@ This version implements several advanced computational geometry techniques:
 - **Bezier Sampling**: High-quality curve discretization for smooth muscle paths
 - **Automatic Material Nodes**: Procedural shader networks for realistic muscle appearance
 - **Dynamic Mesh Updates**: Real-time mesh regeneration based on curve modifications
+
+## For developers
+
+- [devdocs/ARCHITECTURE.md](devdocs/ARCHITECTURE.md): layout, workflow, measurements, how to extend
+- [devdocs/MUSCLE_RECORD.md](devdocs/MUSCLE_RECORD.md): the data contract shared with other tools
+- [devdocs/reference/](devdocs/reference/index.md): API reference generated from the code
+- [AGENTS.md](AGENTS.md): orientation and rules for AI coding agents
 
 ## License
 

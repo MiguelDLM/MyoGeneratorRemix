@@ -1,3 +1,7 @@
+"""Procedural muscle material applied to the final belly mesh (visual only).
+
+Node set-up after Ned Poreyra (https://www.artstation.com/artwork/Rb8LO).
+"""
 import bpy
 
 def create_muscle_material():
@@ -439,9 +443,12 @@ def _build_muscle_node_tree(mat):
     return mat
 
 def apply_muscle_material(mesh_obj):
-    """
-    Apply the muscle material to a mesh object.
-    Creates the material if it doesn't exist.
+    """Assign the muscle material to a mesh, creating the material if needed.
+
+    :arg mesh_obj: Muscle belly.
+    :type mesh_obj: :class:`bpy.types.Object`
+    :return: True on success.
+    :rtype: bool
     """
     if not mesh_obj or mesh_obj.type != 'MESH':
         return False
