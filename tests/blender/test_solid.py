@@ -459,7 +459,15 @@ class SolidTest(unittest.TestCase):
         t, u = tendon()
         self.assertEqual(float(t[u < 0.05].max()), 0.0)                   # none at the origin
         self.assertGreater(float(t[u > 0.95].min()), 0.1)                 # at the insertion
-        self.assertEqual(float(t[(u > 0.2) & (u < 0.75)].max()), 0.0)     # muscle in between
+        self.assertEqual(float(t[(u > 0.2) & (u < 0.7)].max()), 0.0)      # muscle in between
+        self.assertGreater(float(t[(u > 0.8) & (u < 0.95)].min()), 0.99)  # solid up to its length
+        ft = sys.modules[f"{test_metrics.MODULE_NAME}.fibre_texture"]
+        x = np.linspace(0.0, 1.0, 1001)
+        for length in (0.05, 0.2):                                         # the fade moves, same width
+            w = ft.tendon_mask(x, length, 0.0)
+            fade = x[(w < 0.99) & (w > 0.01)]
+            self.assertAlmostEqual(float(fade.min()), length, delta=0.01)
+            self.assertAlmostEqual(float(fade.max() - fade.min()), ft.TENDON_FADE, delta=0.01)
         self.assertIsNotNone(belly.data.attributes.get("myo_bump"))
         props.muscle_shape = 'FAN'
         self.assertEqual(self.generate().myogen_fibres, 'CONVERGENT')

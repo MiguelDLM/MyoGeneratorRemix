@@ -184,9 +184,12 @@ Fusiform on the same attachments: 27 cm³, two pieces, 59 %.
 Each finished belly has a fibre arrangement (`Object.myogen_fibres`:
 Parallel, Fusiform, Convergent, Pennate, Bipennate, Multipennate), a
 pennation angle for the pennate ones (`Object.myogen_pennation`), a bundle
-density (`Object.myogen_fibre_bundles`, bundles across the width) and the
-tendon colour length at each end (`Object.myogen_tendon_origin`,
-`_insertion`, fractions of the muscle), all set in the muscle list (QA box).
+density (`Object.myogen_fibre_bundles`, bundles across the width), a relief
+factor (`Object.myogen_relief`) and the solid tendon length at each end
+(`Object.myogen_tendon_origin`, `_insertion`, fractions of the muscle, each
+followed by the same `TENDON_FADE` into the muscle, so changing the length
+moves the transition instead of sharpening it), all set in the muscle list
+(QA box).
 
 `fibre_texture.fibre_coordinates` measures every vertex along the path,
 across the section's width and through its thickness (width direction per

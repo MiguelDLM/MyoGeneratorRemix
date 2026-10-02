@@ -43,8 +43,9 @@ the attributes at once.
 | `TYPE_ARRANGEMENT` | `{'FUSIFORM': 'FUSIFORM', 'PARALLEL': 'PARALLEL', 'FAN': 'CONVERGENT'}` |
 | `DEFAULT_BUNDLES` | `30.0` |
 | `MATERIAL_CELLS_ACROSS` | `144.0` |
-| `BUMP_PER_BUNDLE` | `0.6` |
-| `DEFAULT_TENDON` | `0.04` |
+| `BUMP_PER_BUNDLE` | `2.0` |
+| `TENDON_FADE` | `0.06` |
+| `DEFAULT_TENDON` | `0.02` |
 | `DEFAULT_PENNATION` | `20.0` |
 
 ## Functions
@@ -74,18 +75,22 @@ World size of one unit of the fibre coordinates (Blender units per unit).
 
 **Returns** (float): 
 
-### `tendon_mask(u, origin_fraction, insertion_fraction)`
+### `tendon_mask(u, origin_fraction, insertion_fraction, fade=None)`
 
 Tendon colour weight (0-1) along the muscle.
 
-1 at each end, fading to 0 over `origin_fraction` / `insertion_fraction`
-of the length (smooth step); 0 fractions give no tendon at that end.
+Solid tendon over `origin_fraction` / `insertion_fraction` of the
+length from each end, then the same smooth fade into the muscle
+(`fade`, default `TENDON_FADE`) whatever the tendon's length, so
+changing the length moves the transition instead of sharpening it.
+A 0 fraction gives no tendon at that end.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `u` | `numpy.ndarray` | Position along the path (0-1), per vertex. |
 | `origin_fraction` | float | Tendon length at the origin, fraction of the muscle. |
 | `insertion_fraction` | float | Tendon length at the insertion. |
+| `fade` | float | Length of the fade, fraction of the muscle. |
 
 **Returns** (`numpy.ndarray`): 
 

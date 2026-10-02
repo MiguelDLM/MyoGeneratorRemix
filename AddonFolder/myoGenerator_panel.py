@@ -67,6 +67,7 @@ def _draw_fibre_selector(layout, coll):
     if belly.myogen_fibres in PENNATE:
         row.prop(belly, "myogen_pennation", text="")
     row.prop(belly, "myogen_fibre_bundles", text="")
+    row.prop(belly, "myogen_relief", text="")
     row = layout.row(align=True)
     row.label(text="", icon='BLANK1')
     row.prop(belly, "myogen_tendon_origin", text="Tendon O", slider=True)

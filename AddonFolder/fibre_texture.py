@@ -62,9 +62,11 @@ DEFAULT_BUNDLES = 30.0
 #: Cells across one unit of the material's Y coordinate (Mapping scale x Voronoi scale).
 MATERIAL_CELLS_ACROSS = 144.0
 #: Bump depth of the texture, in bundle widths.
-BUMP_PER_BUNDLE = 0.6
+BUMP_PER_BUNDLE = 2.0
+#: Length of the fade from tendon to muscle (fraction of the muscle).
+TENDON_FADE = 0.06
 #: Default tendon length at each end (fraction of the muscle).
-DEFAULT_TENDON = 0.04
+DEFAULT_TENDON = 0.02
 #: Default pennation angle (degrees) when the scene's pennation is 0.
 DEFAULT_PENNATION = 20.0
 
@@ -154,24 +156,19 @@ def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_
     centres_u = (np.arange(SECTION_BINS) + 0.5) / SECTION_BINS
     half = np.interp(centres_u, centres_u[good], half[good]) if good.any() else np.ones(SECTION_BINS)
     thick = np.interp(centres_u, centres_u[good], thick[good]) if good.any() else np.ones(SECTION_BINS)
+    half = _smooth(half, RADIUS_SMOOTHING)                     # no jumps from section to section
+    thick = _smooth(thick, RADIUS_SMOOTHING)
     th = np.interp(u, centres_u, theta)
     hw = np.maximum(np.interp(u, centres_u, half), 1e-9)
     a = dn * np.cos(th) + db * np.sin(th)                     # across the width
     r = -dn * np.sin(th) + db * np.cos(th)                    # through the thickness
     alpha = math.radians(pennation_deg)
-    if arrangement in ('PARALLEL', 'FUSIFORM', 'CONVERGENT'):
-        # Fibres along the path: the phase is the angle around the section's
-        # axis (elliptical, so flat sections spread it over their width),
-        # times a radius: the distance around the section for Parallel, the
-        # same for every section (fibres converging as the section narrows)
-        # for Fusiform and Convergent.
-        hr = np.maximum(np.interp(u, centres_u, thick), 1e-9)
-        angle = np.arctan2(r / hr, a / hw)
-        if arrangement == 'PARALLEL':                           # constant spacing: smoothed local radius
-            radius = np.interp(u, centres_u, _smooth((half + thick) / 2.0, RADIUS_SMOOTHING))
-        else:                                                   # same for every section: fibres converge
-            radius = float(np.mean((half + thick) / 2.0))
-        phase, fibre_along = angle * radius, along
+    # Every arrangement uses the signed position across the width (smooth,
+    # unlike an angle around the axis, which wraps) and the smoothed width.
+    if arrangement == 'PARALLEL':
+        phase, fibre_along = a, along                          # constant spacing
+    elif arrangement in ('FUSIFORM', 'CONVERGENT'):
+        phase, fibre_along = a / hw * float(np.mean(half)), along   # converge as the section narrows
     else:
         if arrangement == 'PENNATE':
             across = a + hw                                     # tendon along one side
@@ -206,11 +203,14 @@ def bundle_size(vertices, coords):
     return span_world / span_coord / MATERIAL_CELLS_ACROSS
 
 
-def tendon_mask(u, origin_fraction, insertion_fraction):
+def tendon_mask(u, origin_fraction, insertion_fraction, fade=None):
     """Tendon colour weight (0-1) along the muscle.
 
-    1 at each end, fading to 0 over ``origin_fraction`` / ``insertion_fraction``
-    of the length (smooth step); 0 fractions give no tendon at that end.
+    Solid tendon over ``origin_fraction`` / ``insertion_fraction`` of the
+    length from each end, then the same smooth fade into the muscle
+    (``fade``, default ``TENDON_FADE``) whatever the tendon's length, so
+    changing the length moves the transition instead of sharpening it.
+    A 0 fraction gives no tendon at that end.
 
     :arg u: Position along the path (0-1), per vertex.
     :type u: :class:`numpy.ndarray`
@@ -218,14 +218,18 @@ def tendon_mask(u, origin_fraction, insertion_fraction):
     :type origin_fraction: float
     :arg insertion_fraction: Tendon length at the insertion.
     :type insertion_fraction: float
+    :arg fade: Length of the fade, fraction of the muscle.
+    :type fade: float
     :rtype: :class:`numpy.ndarray`
     """
-    def fade(x, f):
+    fade = TENDON_FADE if fade is None else fade
+
+    def end(x, f):
         if f <= 0.0:
             return np.zeros_like(x)
-        t = np.clip(1.0 - x / f, 0.0, 1.0)
+        t = np.clip(1.0 - (x - f) / max(fade, 1e-9), 0.0, 1.0)
         return t * t * (3.0 - 2.0 * t)
-    return np.maximum(fade(u, origin_fraction), fade(1.0 - u, insertion_fraction))
+    return np.maximum(end(u, origin_fraction), end(1.0 - u, insertion_fraction))
 
 
 def _smooth(values, width):
@@ -262,7 +266,7 @@ def apply_fibre_texture(context, belly, arrangement=None, pennation_deg=None):
     coords, u = fibre_coordinates(V, tube.sample_path(path), arrangement, pennation_deg,
                                   belly.myogen_fibre_bundles)
     tendon = tendon_mask(u, belly.myogen_tendon_origin, belly.myogen_tendon_insertion)
-    bump = np.full(len(u), bundle_size(V, coords) * BUMP_PER_BUNDLE)
+    bump = np.full(len(u), bundle_size(V, coords) * BUMP_PER_BUNDLE * belly.myogen_relief)
     for name, kind, data, key in (("myo_fibre", 'FLOAT_VECTOR', coords, "vector"),
                                   ("myo_fibre_u", 'FLOAT', u, "value"),
                                   ("myo_tendon", 'FLOAT', tendon, "value"),
@@ -326,16 +330,19 @@ def register():
         name="Bundles", default=DEFAULT_BUNDLES, min=2.0, soft_max=150.0, precision=0,
         update=_on_fibre_setting_changed,
         description="Fibre bundles drawn across the muscle's width: fewer = coarser bundles (visual only)")
+    bpy.types.Object.myogen_relief = bpy.props.FloatProperty(
+        name="Relief", default=1.0, min=0.0, soft_max=4.0, update=_on_fibre_setting_changed,
+        description="Depth of the texture's relief (bump), relative to the default (visual only)")
     bpy.types.Object.myogen_tendon_origin = bpy.props.FloatProperty(
         name="Tendon at origin", default=DEFAULT_TENDON, min=0.0, max=0.5, subtype='FACTOR',
         update=_on_fibre_setting_changed,
-        description="Length of the pale tendon colour at the origin end, as a fraction of the muscle "
-                    "(visual only; 0 = none)")
+        description="Length of the pale tendon colour at the origin end, as a fraction of the muscle, "
+                    "before it fades into the muscle (visual only; 0 = none)")
     bpy.types.Object.myogen_tendon_insertion = bpy.props.FloatProperty(
         name="Tendon at insertion", default=DEFAULT_TENDON, min=0.0, max=0.5, subtype='FACTOR',
         update=_on_fibre_setting_changed,
-        description="Length of the pale tendon colour at the insertion end, as a fraction of the muscle "
-                    "(visual only; 0 = none)")
+        description="Length of the pale tendon colour at the insertion end, as a fraction of the muscle, "
+                    "before it fades into the muscle (visual only; 0 = none)")
     bpy.types.Object.myogen_pennation = bpy.props.FloatProperty(
         name="Pennation (°)", default=DEFAULT_PENNATION, min=0.0, max=60.0, precision=0,
         update=_on_fibre_setting_changed,
@@ -345,7 +352,7 @@ def register():
 
 def unregister():
     """Remove the per-belly fibre settings."""
-    for name in ("myogen_fibres", "myogen_pennation", "myogen_fibre_bundles", "myogen_tendon_origin",
+    for name in ("myogen_fibres", "myogen_pennation", "myogen_fibre_bundles", "myogen_relief", "myogen_tendon_origin",
                  "myogen_tendon_insertion"):
         if hasattr(bpy.types.Object, name):
             delattr(bpy.types.Object, name)
