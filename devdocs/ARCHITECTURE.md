@@ -185,11 +185,13 @@ Each finished belly has a fibre arrangement (`Object.myogen_fibres`:
 Parallel, Fusiform, Convergent, Pennate, Bipennate, Multipennate), a
 pennation angle for the pennate ones (`Object.myogen_pennation`), a bundle
 density (`Object.myogen_fibre_bundles`, bundles across the width), a relief
-factor (`Object.myogen_relief`) and the solid tendon length at each end
-(`Object.myogen_tendon_origin`, `_insertion`, fractions of the muscle, each
-followed by the same `TENDON_FADE` into the muscle, so changing the length
-moves the transition instead of sharpening it), all set in the muscle list
-(QA box).
+factor (`Object.myogen_relief`) and the tendon colour, all set in the
+muscle list (QA box). The tendon colour follows the **distance to each
+attachment surface** (`fibre_texture.attachment_distance`), so it runs along
+the whole outline of an attachment of any shape (a line, a "]", a patch):
+solid within `Object.myogen_tendon_origin` / `_insertion` of it, then a fade
+of width `Object.myogen_tendon_fade` (all fractions of the muscle length;
+extent and softness are independent).
 
 `fibre_texture.fibre_coordinates` measures every vertex along the path,
 across the section's width and through its thickness (width direction per

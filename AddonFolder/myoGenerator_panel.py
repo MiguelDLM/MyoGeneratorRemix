@@ -72,6 +72,7 @@ def _draw_fibre_selector(layout, coll):
     row.label(text="", icon='BLANK1')
     row.prop(belly, "myogen_tendon_origin", text="Tendon O", slider=True)
     row.prop(belly, "myogen_tendon_insertion", text="I", slider=True)
+    row.prop(belly, "myogen_tendon_fade", text="Fade", slider=True)
 
 
 def draw_qa_box(layout, context):

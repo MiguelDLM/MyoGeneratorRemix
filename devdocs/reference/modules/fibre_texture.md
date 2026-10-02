@@ -27,7 +27,8 @@ coordinates), `myo_fibre_u` (0 at the origin, 1 at the insertion) and
 `myo_tendon` (pale tendon colour weight), which the muscle material reads
 (`muscle_texture.create_fibre_material`). Each belly carries its
 choices in `Object.myogen_fibres`, `Object.myogen_pennation` and
-`Object.myogen_tendon_origin` / `_insertion`; changing any recomputes
+`Object.myogen_tendon_origin` / `_insertion` / `_fade` (the tendon
+colour follows the distance to each attachment surface); changing any recomputes
 the attributes at once.
 
 ## Constants
@@ -44,8 +45,8 @@ the attributes at once.
 | `DEFAULT_BUNDLES` | `30.0` |
 | `MATERIAL_CELLS_ACROSS` | `144.0` |
 | `BUMP_PER_BUNDLE` | `2.0` |
-| `TENDON_FADE` | `0.06` |
-| `DEFAULT_TENDON` | `0.02` |
+| `DEFAULT_TENDON_FADE` | `0.08` |
+| `DEFAULT_TENDON` | `0.01` |
 | `DEFAULT_PENNATION` | `20.0` |
 
 ## Functions
@@ -75,22 +76,33 @@ World size of one unit of the fibre coordinates (Blender units per unit).
 
 **Returns** (float): 
 
-### `tendon_mask(u, origin_fraction, insertion_fraction, fade=None)`
+### `attachment_distance(vertices, surface_obj)`
 
-Tendon colour weight (0-1) along the muscle.
-
-Solid tendon over `origin_fraction` / `insertion_fraction` of the
-length from each end, then the same smooth fade into the muscle
-(`fade`, default `TENDON_FADE`) whatever the tendon's length, so
-changing the length moves the transition instead of sharpening it.
-A 0 fraction gives no tendon at that end.
+Distance of each point to an attachment surface (Blender units).
 
 | Parameter | Type | Description |
 |---|---|---|
-| `u` | `numpy.ndarray` | Position along the path (0-1), per vertex. |
-| `origin_fraction` | float | Tendon length at the origin, fraction of the muscle. |
-| `insertion_fraction` | float | Tendon length at the insertion. |
-| `fade` | float | Length of the fade, fraction of the muscle. |
+| `vertices` | `numpy.ndarray` | World-space points, (N, 3). |
+| `surface_obj` | `bpy.types.Object` | Attachment surface. |
+
+**Returns** (`numpy.ndarray`): 
+
+### `tendon_mask(d_origin, d_insertion, origin_extent, insertion_extent, fade)`
+
+Tendon colour weight (0-1) from the distance to each attachment.
+
+Solid tendon within `*_extent` of the attachment surface (so it follows
+the attachment's outline: a line, a "]", a patch), then a smooth fade
+into the muscle over `fade`; all as fractions of the muscle length.
+A 0 extent gives no tendon at that end.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `d_origin` | `numpy.ndarray` | Distance of each point to the origin attachment / muscle length. |
+| `d_insertion` | `numpy.ndarray` | Distance to the insertion attachment / muscle length. |
+| `origin_extent` | float | Solid tendon reach from the origin. |
+| `insertion_extent` | float | Solid tendon reach from the insertion. |
+| `fade` | float | Width of the fade into the muscle. |
 
 **Returns** (`numpy.ndarray`): 
 

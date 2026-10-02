@@ -23,7 +23,8 @@ coordinates), ``myo_fibre_u`` (0 at the origin, 1 at the insertion) and
 ``myo_tendon`` (pale tendon colour weight), which the muscle material reads
 (:func:`muscle_texture.create_fibre_material`). Each belly carries its
 choices in ``Object.myogen_fibres``, ``Object.myogen_pennation`` and
-``Object.myogen_tendon_origin`` / ``_insertion``; changing any recomputes
+``Object.myogen_tendon_origin`` / ``_insertion`` / ``_fade`` (the tendon
+colour follows the distance to each attachment surface); changing any recomputes
 the attributes at once.
 """
 
@@ -63,10 +64,10 @@ DEFAULT_BUNDLES = 30.0
 MATERIAL_CELLS_ACROSS = 144.0
 #: Bump depth of the texture, in bundle widths.
 BUMP_PER_BUNDLE = 2.0
-#: Length of the fade from tendon to muscle (fraction of the muscle).
-TENDON_FADE = 0.06
-#: Default tendon length at each end (fraction of the muscle).
-DEFAULT_TENDON = 0.02
+#: Default width of the fade from tendon to muscle (fraction of the muscle).
+DEFAULT_TENDON_FADE = 0.08
+#: Default solid tendon reach from each attachment (fraction of the muscle).
+DEFAULT_TENDON = 0.01
 #: Default pennation angle (degrees) when the scene's pennation is 0.
 DEFAULT_PENNATION = 20.0
 
@@ -203,33 +204,52 @@ def bundle_size(vertices, coords):
     return span_world / span_coord / MATERIAL_CELLS_ACROSS
 
 
-def tendon_mask(u, origin_fraction, insertion_fraction, fade=None):
-    """Tendon colour weight (0-1) along the muscle.
+def attachment_distance(vertices, surface_obj):
+    """Distance of each point to an attachment surface (Blender units).
 
-    Solid tendon over ``origin_fraction`` / ``insertion_fraction`` of the
-    length from each end, then the same smooth fade into the muscle
-    (``fade``, default ``TENDON_FADE``) whatever the tendon's length, so
-    changing the length moves the transition instead of sharpening it.
-    A 0 fraction gives no tendon at that end.
+    :arg vertices: World-space points, (N, 3).
+    :type vertices: :class:`numpy.ndarray`
+    :arg surface_obj: Attachment surface.
+    :type surface_obj: :class:`bpy.types.Object`
+    :rtype: :class:`numpy.ndarray`
+    """
+    import bmesh
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    bm = bmesh.new()
+    bm.from_mesh(surface_obj.data)
+    bm.transform(surface_obj.matrix_world)
+    tree = BVHTree.FromBMesh(bm)
+    bm.free()
+    return np.array([tree.find_nearest(Vector(p))[3] for p in np.asarray(vertices).tolist()])
 
-    :arg u: Position along the path (0-1), per vertex.
-    :type u: :class:`numpy.ndarray`
-    :arg origin_fraction: Tendon length at the origin, fraction of the muscle.
-    :type origin_fraction: float
-    :arg insertion_fraction: Tendon length at the insertion.
-    :type insertion_fraction: float
-    :arg fade: Length of the fade, fraction of the muscle.
+
+def tendon_mask(d_origin, d_insertion, origin_extent, insertion_extent, fade):
+    """Tendon colour weight (0-1) from the distance to each attachment.
+
+    Solid tendon within ``*_extent`` of the attachment surface (so it follows
+    the attachment's outline: a line, a "]", a patch), then a smooth fade
+    into the muscle over ``fade``; all as fractions of the muscle length.
+    A 0 extent gives no tendon at that end.
+
+    :arg d_origin: Distance of each point to the origin attachment / muscle length.
+    :type d_origin: :class:`numpy.ndarray`
+    :arg d_insertion: Distance to the insertion attachment / muscle length.
+    :type d_insertion: :class:`numpy.ndarray`
+    :arg origin_extent: Solid tendon reach from the origin.
+    :type origin_extent: float
+    :arg insertion_extent: Solid tendon reach from the insertion.
+    :type insertion_extent: float
+    :arg fade: Width of the fade into the muscle.
     :type fade: float
     :rtype: :class:`numpy.ndarray`
     """
-    fade = TENDON_FADE if fade is None else fade
-
-    def end(x, f):
-        if f <= 0.0:
-            return np.zeros_like(x)
-        t = np.clip(1.0 - (x - f) / max(fade, 1e-9), 0.0, 1.0)
+    def end(d, extent):
+        if extent <= 0.0:
+            return np.zeros_like(d)
+        t = np.clip(1.0 - (d - extent) / max(fade, 1e-9), 0.0, 1.0)
         return t * t * (3.0 - 2.0 * t)
-    return np.maximum(end(u, origin_fraction), end(1.0 - u, insertion_fraction))
+    return np.maximum(end(d_origin, origin_extent), end(d_insertion, insertion_extent))
 
 
 def _smooth(values, width):
@@ -265,7 +285,14 @@ def apply_fibre_texture(context, belly, arrangement=None, pennation_deg=None):
     V = co.reshape(-1, 3) @ m[:3, :3].T + m[:3, 3]
     coords, u = fibre_coordinates(V, tube.sample_path(path), arrangement, pennation_deg,
                                   belly.myogen_fibre_bundles)
-    tendon = tendon_mask(u, belly.myogen_tendon_origin, belly.myogen_tendon_insertion)
+    objs = myo_record.resolve_objects(coll)
+    points = tube.sample_path(path)
+    length = sum((b - a).length for a, b in zip(points[:-1], points[1:])) or 1.0
+    far = np.full(len(V), np.inf)
+    d_o = attachment_distance(V, objs["origin"]) / length if objs.get("origin") else far
+    d_i = attachment_distance(V, objs["insertion"]) / length if objs.get("insertion") else far
+    tendon = tendon_mask(d_o, d_i, belly.myogen_tendon_origin, belly.myogen_tendon_insertion,
+                         belly.myogen_tendon_fade)
     bump = np.full(len(u), bundle_size(V, coords) * BUMP_PER_BUNDLE * belly.myogen_relief)
     for name, kind, data, key in (("myo_fibre", 'FLOAT_VECTOR', coords, "vector"),
                                   ("myo_fibre_u", 'FLOAT', u, "value"),
@@ -336,13 +363,18 @@ def register():
     bpy.types.Object.myogen_tendon_origin = bpy.props.FloatProperty(
         name="Tendon at origin", default=DEFAULT_TENDON, min=0.0, max=0.5, subtype='FACTOR',
         update=_on_fibre_setting_changed,
-        description="Length of the pale tendon colour at the origin end, as a fraction of the muscle, "
-                    "before it fades into the muscle (visual only; 0 = none)")
+        description="How far the solid pale tendon colour reaches from the origin attachment, all along its "
+                    "outline, as a fraction of the muscle length (visual only; 0 = none)")
     bpy.types.Object.myogen_tendon_insertion = bpy.props.FloatProperty(
         name="Tendon at insertion", default=DEFAULT_TENDON, min=0.0, max=0.5, subtype='FACTOR',
         update=_on_fibre_setting_changed,
-        description="Length of the pale tendon colour at the insertion end, as a fraction of the muscle, "
-                    "before it fades into the muscle (visual only; 0 = none)")
+        description="How far the solid pale tendon colour reaches from the insertion attachment, all along "
+                    "its outline, as a fraction of the muscle length (visual only; 0 = none)")
+    bpy.types.Object.myogen_tendon_fade = bpy.props.FloatProperty(
+        name="Tendon fade", default=DEFAULT_TENDON_FADE, min=0.0, max=0.6, subtype='FACTOR',
+        update=_on_fibre_setting_changed,
+        description="Width of the fade from tendon to muscle, as a fraction of the muscle length: larger = "
+                    "softer (visual only)")
     bpy.types.Object.myogen_pennation = bpy.props.FloatProperty(
         name="Pennation (°)", default=DEFAULT_PENNATION, min=0.0, max=60.0, precision=0,
         update=_on_fibre_setting_changed,
@@ -353,6 +385,6 @@ def register():
 def unregister():
     """Remove the per-belly fibre settings."""
     for name in ("myogen_fibres", "myogen_pennation", "myogen_fibre_bundles", "myogen_relief", "myogen_tendon_origin",
-                 "myogen_tendon_insertion"):
+                 "myogen_tendon_insertion", "myogen_tendon_fade"):
         if hasattr(bpy.types.Object, name):
             delattr(bpy.types.Object, name)

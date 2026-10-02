@@ -447,27 +447,27 @@ class SolidTest(unittest.TestCase):
         corr_pen = abs(np.corrcoef(pen[:, 1], pen[:, 0])[0, 1])
         self.assertLess(corr_par, 0.3)                                    # phase independent of length
         self.assertGreater(corr_pen, corr_par + 0.2)                      # oblique fibres
-        # tendon colour: set per end
-        def tendon():
-            attr = belly.data.attributes["myo_tendon"]
-            v = np.empty(len(attr.data), dtype=np.float32)
-            attr.data.foreach_get("value", v)
-            u = np.empty(len(attr.data), dtype=np.float32)
-            belly.data.attributes["myo_fibre_u"].data.foreach_get("value", u)
-            return v, u
-        belly.myogen_tendon_origin, belly.myogen_tendon_insertion = 0.0, 0.2
-        t, u = tendon()
-        self.assertEqual(float(t[u < 0.05].max()), 0.0)                   # none at the origin
-        self.assertGreater(float(t[u > 0.95].min()), 0.1)                 # at the insertion
-        self.assertEqual(float(t[(u > 0.2) & (u < 0.7)].max()), 0.0)      # muscle in between
-        self.assertGreater(float(t[(u > 0.8) & (u < 0.95)].min()), 0.99)  # solid up to its length
+        # tendon colour: from the distance to each attachment surface
         ft = sys.modules[f"{test_metrics.MODULE_NAME}.fibre_texture"]
+        attr = belly.data.attributes["myo_tendon"]
+        belly.myogen_tendon_fade = 0.05
+        belly.myogen_tendon_origin, belly.myogen_tendon_insertion = 0.0, 0.1
+        t = np.empty(len(attr.data), dtype=np.float32)
+        belly.data.attributes["myo_tendon"].data.foreach_get("value", t)
+        verts = np.array([list(belly.matrix_world @ v.co) for v in belly.data.vertices])
+        pts = self.tube.sample_path(self.coll.objects[M + "_curve"])
+        length = sum((b - a).length for a, b in zip(pts[:-1], pts[1:]))
+        d_i = ft.attachment_distance(verts, self.coll.objects[M + "_insertion"]) / length
+        d_o = ft.attachment_distance(verts, self.coll.objects[M + "_origin"]) / length
+        self.assertGreater(float(t[d_i < 0.09].min()), 0.99)              # solid along the attachment outline
+        self.assertEqual(float(t[(d_i > 0.16) & (d_o > 0.0)].max()), 0.0)  # muscle beyond extent + fade
+        self.assertEqual(float(t[d_o < 0.02].max()), 0.0)                 # none at the origin
         x = np.linspace(0.0, 1.0, 1001)
-        for length in (0.05, 0.2):                                         # the fade moves, same width
-            w = ft.tendon_mask(x, length, 0.0)
+        for extent in (0.02, 0.2):                                         # the fade moves, same width
+            w = ft.tendon_mask(x, np.full_like(x, np.inf), extent, 0.0, 0.08)
             fade = x[(w < 0.99) & (w > 0.01)]
-            self.assertAlmostEqual(float(fade.min()), length, delta=0.01)
-            self.assertAlmostEqual(float(fade.max() - fade.min()), ft.TENDON_FADE, delta=0.01)
+            self.assertAlmostEqual(float(fade.min()), extent, delta=0.01)
+            self.assertAlmostEqual(float(fade.max() - fade.min()), 0.08, delta=0.01)
         self.assertIsNotNone(belly.data.attributes.get("myo_bump"))
         props.muscle_shape = 'FAN'
         self.assertEqual(self.generate().myogen_fibres, 'CONVERGENT')
