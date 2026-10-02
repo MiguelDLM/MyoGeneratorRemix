@@ -22,11 +22,13 @@ Multipennate   several internal tendons, fibres in alternating "V"s
 =============  =================================================================
 
 The coordinates are stored on the mesh as the point attributes
-`myo_fibre` (vector: phase, along, depth, scaled by the path length) and
-`myo_fibre_u` (0 at the origin, 1 at the insertion, for the tendon tint),
-which the material reads. Each belly carries its choice in
-`Object.myogen_fibres` (and `Object.myogen_pennation`); changing either
-recomputes the coordinates at once.
+`myo_fibre` (vector: along, phase, depth, normalised 0-1 like object
+coordinates), `myo_fibre_u` (0 at the origin, 1 at the insertion) and
+`myo_tendon` (pale tendon colour weight), which the muscle material reads
+(`muscle_texture.create_fibre_material`). Each belly carries its
+choices in `Object.myogen_fibres`, `Object.myogen_pennation` and
+`Object.myogen_tendon_origin` / `_insertion`; changing any recomputes
+the attributes at once.
 
 ## Constants
 
@@ -39,11 +41,15 @@ recomputes the coordinates at once.
 | `ROUND_SECTION` | `0.6` |
 | `RADIUS_SMOOTHING` | `7` |
 | `TYPE_ARRANGEMENT` | `{'FUSIFORM': 'FUSIFORM', 'PARALLEL': 'PARALLEL', 'FAN': 'CONVERGENT'}` |
+| `DEFAULT_BUNDLES` | `30.0` |
+| `MATERIAL_CELLS_ACROSS` | `144.0` |
+| `BUMP_PER_BUNDLE` | `0.6` |
+| `DEFAULT_TENDON` | `0.04` |
 | `DEFAULT_PENNATION` | `20.0` |
 
 ## Functions
 
-### `fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_PENNATION)`
+### `fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_PENNATION, bundles=None)`
 
 Fibre texture coordinates of points of a belly.
 
@@ -53,8 +59,35 @@ Fibre texture coordinates of points of a belly.
 | `path_points` | list of `mathutils.Vector` | Arc-length samples of the muscle path (`tube.sample_path`). |
 | `arrangement` | str | One of `ARRANGEMENTS`. |
 | `pennation_deg` | float | Angle between fibres and tendon (pennate arrangements). |
+| `bundles` | float | Fibre bundles across the muscle's width drawn by the material (default `DEFAULT_BUNDLES`); scales the across and depth coordinates. |
 
-**Returns** (tuple of `numpy.ndarray`): `(coords, u)`: (N, 3) `(phase, along, depth)` divided by the path length, and (N,) position along the path (0-1).
+**Returns** (tuple of `numpy.ndarray`): `(coords, u)`: (N, 3) `(along, phase, depth)` in units such that `bundles` bundles span the mean width, and (N,) position along the path (0-1).
+
+### `bundle_size(vertices, coords)`
+
+World size of one unit of the fibre coordinates (Blender units per unit).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `vertices` | `numpy.ndarray` | World-space vertex positions, (N, 3). |
+| `coords` | `numpy.ndarray` | Their fibre coordinates (`fibre_coordinates`). |
+
+**Returns** (float): 
+
+### `tendon_mask(u, origin_fraction, insertion_fraction)`
+
+Tendon colour weight (0-1) along the muscle.
+
+1 at each end, fading to 0 over `origin_fraction` / `insertion_fraction`
+of the length (smooth step); 0 fractions give no tendon at that end.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `u` | `numpy.ndarray` | Position along the path (0-1), per vertex. |
+| `origin_fraction` | float | Tendon length at the origin, fraction of the muscle. |
+| `insertion_fraction` | float | Tendon length at the insertion. |
+
+**Returns** (`numpy.ndarray`): 
 
 ### `apply_fibre_texture(context, belly, arrangement=None, pennation_deg=None)`
 

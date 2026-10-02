@@ -182,22 +182,32 @@ Fusiform on the same attachments: 27 cm³, two pieces, 59 %.
 ### Fibre texture (`fibre_texture.py`, visual only)
 
 Each finished belly has a fibre arrangement (`Object.myogen_fibres`:
-Parallel, Fusiform, Convergent, Pennate, Bipennate, Multipennate) and a
-pennation angle for the pennate ones (`Object.myogen_pennation`), chosen in
-the muscle list (QA box). `fibre_texture.fibre_coordinates` measures every
-vertex along the path, across the section's width and through its
-thickness (width direction per section, kept for round sections and
-smoothed along the path) and writes the point attributes `myo_fibre`
-(phase, along, depth ÷ path length) and `myo_fibre_u` (0–1 along the path).
+Parallel, Fusiform, Convergent, Pennate, Bipennate, Multipennate), a
+pennation angle for the pennate ones (`Object.myogen_pennation`), a bundle
+density (`Object.myogen_fibre_bundles`, bundles across the width) and the
+tendon colour length at each end (`Object.myogen_tendon_origin`,
+`_insertion`, fractions of the muscle), all set in the muscle list (QA box).
+
+`fibre_texture.fibre_coordinates` measures every vertex along the path,
+across the section's width and through its thickness (width direction per
+section, kept for round sections and smoothed along the path).
 Longitudinal arrangements use the angle around the section's axis (times a
 smoothed local radius for Parallel, a constant one for Fusiform/Convergent,
 so fibres converge as the section narrows); pennate ones use the position
 across the width from one side (Pennate), from the centre (Bipennate) or
-from several internal tendons (Multipennate), turned by the pennation
-angle. `muscle_texture.create_fibre_material` draws elongated bundles
-(Voronoi stretched along the fibres), striations, a bump and a tendon tint
-at the ends from those attributes. Generate Final Mesh picks the type's
-default (Fusiform → Fusiform, Parallel → Parallel, Fan → Convergent).
+from several internal tendons (Multipennate), turned by the pennation angle.
+The coordinates (X along the fibres, Y across, Z through) share one unit,
+so the bundles keep the material's elongation whatever the muscle's
+proportions. Point attributes: `myo_fibre` (vector), `myo_fibre_u` (0–1
+along the path), `myo_tendon` (tendon colour weight) and `myo_bump` (relief
+depth, a fraction of the bundle size).
+
+`muscle_texture.create_fibre_material` is the original muscle material (Ned
+Poreyra's node set-up) with its coordinates, tendon colour and bump distance
+taken from those attributes instead of the object's generated coordinates
+(versioned: older fibre materials are rebuilt). Generate Final Mesh picks
+the type's default (Fusiform → Fusiform, Parallel → Parallel, Fan →
+Convergent).
 
 ### Contour correspondence (`contour_matching.py`)
 

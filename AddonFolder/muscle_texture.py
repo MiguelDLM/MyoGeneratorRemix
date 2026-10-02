@@ -444,115 +444,63 @@ def _build_muscle_node_tree(mat):
 
 #: Name of the fibre-oriented muscle material (:mod:`fibre_texture`).
 FIBRE_MATERIAL = "Muscle (fibres)"
-#: Fibre bundles across one path length, and their elongation along the fibres.
-FIBRES_PER_LENGTH = 110.0
-FIBRE_ELONGATION = 9.0
-#: Fine striations per bundle (bands across the fibres).
-STRIATIONS_PER_BUNDLE = 4.0
-#: Waviness and contrast of the striations (too much distortion looks like wood grain).
-STRIATION_DISTORTION = 0.4
-STRIATION_CONTRAST = 0.25
-#: Bump distance of the fibre material, in millimetres.
-FIBRE_BUMP_MM = 0.25
+#: Version of the fibre material's node set-up (older materials are rebuilt).
+FIBRE_MATERIAL_VERSION = 3
+#: Bump distance of the original set-up, in millimetres (it was tuned in mm scenes).
+BUMP_MM = 4.0
 
 
 def create_fibre_material(scene):
-    """Get or create the muscle material oriented by the fibre coordinates.
+    """Get or create the muscle material laid out along the fibres.
 
-    Reads the ``myo_fibre`` point attribute (phase, along, depth; see
-    :mod:`fibre_texture`): elongated fibre bundles (Voronoi cells stretched
-    along the fibres), fine striations along each fibre (bands of the phase,
-    slightly distorted), a bump from both, and a pale tendon tint at both
-    ends from ``myo_fibre_u``.
+    The node set-up of :func:`create_muscle_material` (Ned Poreyra's), with
+    two inputs replaced:
+
+    * its texture coordinates come from the ``myo_fibre`` point attribute
+      (along the muscle, across its fibres, through its thickness, each
+      normalised 0-1 like the object coordinates it replaces; see
+      :mod:`fibre_texture`) instead of the object's generated coordinates,
+      so the bundles follow the fibre arrangement;
+    * the pale tendon colour comes from the ``myo_tendon`` point attribute
+      (0-1), whose extent at each end is set per belly, instead of a fixed
+      band at both ends of the object's X axis;
+    * the relief depth comes from the ``myo_bump`` point attribute (a fraction
+      of the bundle size), so it suits muscles of any size and unit.
 
     :arg scene: Scene (its unit scale sets the bump distance).
     :type scene: :class:`bpy.types.Scene`
     :rtype: :class:`bpy.types.Material`
     """
     mat = bpy.data.materials.get(FIBRE_MATERIAL)
-    if mat is not None:
+    if mat is not None and mat.get("myogen_version") == FIBRE_MATERIAL_VERSION:
         return mat
     from .myo_record import metres_per_unit
-    mat = bpy.data.materials.new(FIBRE_MATERIAL)
+    if mat is None:
+        mat = bpy.data.materials.new(FIBRE_MATERIAL)
+    mat["myogen_version"] = FIBRE_MATERIAL_VERSION         # rebuilt when the set-up changes
     mat.use_nodes = True
-    nt = mat.node_tree
-    nodes, links = nt.nodes, nt.links
-    for node in list(nodes):
-        nodes.remove(node)
-
-    def node(kind, x, y, **settings):
-        n = nodes.new(kind)
-        n.location = (x, y)
-        for key, value in settings.items():
-            setattr(n, key, value)
-        return n
-
-    out = node("ShaderNodeOutputMaterial", 900, 0)
-    bsdf = node("ShaderNodeBsdfPrincipled", 600, 0)
-    bsdf.inputs["Roughness"].default_value = 0.45
-    if "Subsurface Weight" in bsdf.inputs:
-        bsdf.inputs["Subsurface Weight"].default_value = 0.15
-    links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-
-    fibre = node("ShaderNodeAttribute", -1400, 0, attribute_type='GEOMETRY', attribute_name="myo_fibre")
-    ends = node("ShaderNodeAttribute", -1400, 400, attribute_type='GEOMETRY', attribute_name="myo_fibre_u")
-    # bundles: Voronoi cells stretched along the fibres
-    bundle_map = node("ShaderNodeMapping", -1150, 0, vector_type='POINT')
-    bundle_map.inputs["Scale"].default_value = (FIBRES_PER_LENGTH, FIBRES_PER_LENGTH / FIBRE_ELONGATION,
-                                                FIBRES_PER_LENGTH)
-    links.new(fibre.outputs["Vector"], bundle_map.inputs["Vector"])
-    vor = node("ShaderNodeTexVoronoi", -900, 0, feature='F1', voronoi_dimensions='3D')
-    vor.inputs["Scale"].default_value = 1.0
-    vor.inputs["Randomness"].default_value = 0.9
-    links.new(bundle_map.outputs["Vector"], vor.inputs["Vector"])
-    bundle_ramp = node("ShaderNodeValToRGB", -650, 0)
-    bundle_ramp.color_ramp.elements[0].position = 0.25
-    bundle_ramp.color_ramp.elements[0].color = (1, 1, 1, 1)
-    bundle_ramp.color_ramp.elements[1].position = 0.75
-    bundle_ramp.color_ramp.elements[1].color = (0, 0, 0, 1)
-    links.new(vor.outputs["Distance"], bundle_ramp.inputs["Fac"])
-    # striations: bands of the phase, distorted a little along the fibres
-    sep = node("ShaderNodeSeparateXYZ", -1150, -350)
-    links.new(fibre.outputs["Vector"], sep.inputs["Vector"])
-    stripe_in = node("ShaderNodeCombineXYZ", -900, -350)
-    links.new(sep.outputs["X"], stripe_in.inputs["X"])
-    wave = node("ShaderNodeTexWave", -650, -350, wave_type='BANDS', bands_direction='X')
-    wave.inputs["Scale"].default_value = FIBRES_PER_LENGTH * STRIATIONS_PER_BUNDLE
-    wave.inputs["Distortion"].default_value = STRIATION_DISTORTION
-    wave.inputs["Detail"].default_value = 0.0
-    links.new(stripe_in.outputs["Vector"], wave.inputs["Vector"])
-    noise = node("ShaderNodeTexNoise", -900, -600)
-    noise.inputs["Scale"].default_value = FIBRES_PER_LENGTH / FIBRE_ELONGATION
-    links.new(fibre.outputs["Vector"], noise.inputs["Vector"])
-    links.new(noise.outputs["Fac"], stripe_in.inputs["Y"])
-    # combine: bundle borders darker, striations subtle
-    height = node("ShaderNodeMath", -400, -150, operation='MULTIPLY_ADD')
-    links.new(wave.outputs["Fac"], height.inputs[0])
-    height.inputs[1].default_value = STRIATION_CONTRAST
-    links.new(bundle_ramp.outputs["Color"], height.inputs[2])
-    shade = node("ShaderNodeMix", -150, 150, data_type='RGBA', blend_type='MIX')
-    shade.inputs["A"].default_value = (0.20, 0.025, 0.02, 1.0)      # between bundles
-    shade.inputs["B"].default_value = (0.62, 0.11, 0.08, 1.0)       # fibre
-    links.new(height.outputs["Value"], shade.inputs["Factor"])
-    tendon_ramp = node("ShaderNodeValToRGB", -650, 400)
-    elems = tendon_ramp.color_ramp.elements
-    elems[0].position, elems[0].color = 0.0, (1, 1, 1, 1)
-    elems[1].position, elems[1].color = 0.06, (0, 0, 0, 1)
-    e2 = elems.new(0.94)
-    e2.color = (0, 0, 0, 1)
-    e3 = elems.new(1.0)
-    e3.color = (1, 1, 1, 1)
-    links.new(ends.outputs["Fac"], tendon_ramp.inputs["Fac"])
-    tendon = node("ShaderNodeMix", 150, 250, data_type='RGBA', blend_type='MIX')
-    links.new(tendon_ramp.outputs["Color"], tendon.inputs["Factor"])
-    links.new(shade.outputs["Result"], tendon.inputs["A"])
-    tendon.inputs["B"].default_value = (0.85, 0.80, 0.72, 1.0)
-    links.new(tendon.outputs["Result"], bsdf.inputs["Base Color"])
-    bump = node("ShaderNodeBump", 350, -200)
-    bump.inputs["Strength"].default_value = 0.6
-    bump.inputs["Distance"].default_value = FIBRE_BUMP_MM / 1000.0 / metres_per_unit(scene)
-    links.new(height.outputs["Value"], bump.inputs["Height"])
-    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    _build_muscle_node_tree(mat)
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    coord = nodes.new("ShaderNodeAttribute")
+    coord.attribute_type = 'GEOMETRY'
+    coord.attribute_name = "myo_fibre"
+    coord.location = (-1314.0, 70.0)
+    tendon = nodes.new("ShaderNodeAttribute")
+    tendon.attribute_type = 'GEOMETRY'
+    tendon.attribute_name = "myo_tendon"
+    tendon.location = (-420.0, 520.0)
+    links.new(coord.outputs["Vector"], nodes["Mapping"].inputs["Vector"])
+    links.new(tendon.outputs["Fac"], nodes["Mix.002"].inputs["Factor"])
+    for name in ("Texture Coordinate", "Mapping.001", "Gradient Texture", "Color Ramp.002"):
+        node = nodes.get(name)
+        if node is not None:
+            nodes.remove(node)
+    bump = nodes.new("ShaderNodeAttribute")                 # relief depth: per belly, from its bundle size
+    bump.attribute_type = 'GEOMETRY'
+    bump.attribute_name = "myo_bump"
+    bump.location = (-420.0, 160.0)
+    links.new(bump.outputs["Fac"], nodes["Bump"].inputs["Distance"])
+    nodes["Bump"].inputs["Distance"].default_value = BUMP_MM / 1000.0 / metres_per_unit(scene)
     return mat
 
 

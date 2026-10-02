@@ -18,11 +18,13 @@ Multipennate   several internal tendons, fibres in alternating "V"s
 =============  =================================================================
 
 The coordinates are stored on the mesh as the point attributes
-``myo_fibre`` (vector: phase, along, depth, scaled by the path length) and
-``myo_fibre_u`` (0 at the origin, 1 at the insertion, for the tendon tint),
-which the material reads. Each belly carries its choice in
-``Object.myogen_fibres`` (and ``Object.myogen_pennation``); changing either
-recomputes the coordinates at once.
+``myo_fibre`` (vector: along, phase, depth, normalised 0-1 like object
+coordinates), ``myo_fibre_u`` (0 at the origin, 1 at the insertion) and
+``myo_tendon`` (pale tendon colour weight), which the muscle material reads
+(:func:`muscle_texture.create_fibre_material`). Each belly carries its
+choices in ``Object.myogen_fibres``, ``Object.myogen_pennation`` and
+``Object.myogen_tendon_origin`` / ``_insertion``; changing any recomputes
+the attributes at once.
 """
 
 import math
@@ -55,11 +57,20 @@ ROUND_SECTION = 0.6
 RADIUS_SMOOTHING = 7
 #: Default arrangement per muscle type.
 TYPE_ARRANGEMENT = {'FUSIFORM': 'FUSIFORM', 'PARALLEL': 'PARALLEL', 'FAN': 'CONVERGENT'}
+#: Default fibre bundles across the muscle's width.
+DEFAULT_BUNDLES = 30.0
+#: Cells across one unit of the material's Y coordinate (Mapping scale x Voronoi scale).
+MATERIAL_CELLS_ACROSS = 144.0
+#: Bump depth of the texture, in bundle widths.
+BUMP_PER_BUNDLE = 0.6
+#: Default tendon length at each end (fraction of the muscle).
+DEFAULT_TENDON = 0.04
 #: Default pennation angle (degrees) when the scene's pennation is 0.
 DEFAULT_PENNATION = 20.0
 
 
-def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_PENNATION):
+def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_PENNATION,
+                      bundles=None):
     """Fibre texture coordinates of points of a belly.
 
     :arg vertices: World-space vertex positions, (N, 3).
@@ -70,8 +81,13 @@ def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_
     :type arrangement: str
     :arg pennation_deg: Angle between fibres and tendon (pennate arrangements).
     :type pennation_deg: float
-    :return: ``(coords, u)``: (N, 3) ``(phase, along, depth)`` divided by the
-       path length, and (N,) position along the path (0-1).
+    :arg bundles: Fibre bundles across the muscle's width drawn by the
+       material (default ``DEFAULT_BUNDLES``); scales the across and depth
+       coordinates.
+    :type bundles: float
+    :return: ``(coords, u)``: (N, 3) ``(along, phase, depth)`` in units such
+       that ``bundles`` bundles span the mean width, and (N,) position along
+       the path (0-1).
     :rtype: tuple of :class:`numpy.ndarray`
     """
     P = np.array([list(p) for p in path_points])
@@ -166,8 +182,50 @@ def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_
             across = np.abs(np.mod(a + hw, spacing) - spacing / 2.0)
         phase = -along * math.sin(alpha) + across * math.cos(alpha)
         fibre_along = along * math.cos(alpha) + across * math.sin(alpha)
-    coords = np.stack([phase, fibre_along, r], axis=1) / length
+    # X along the fibres, Y across them, Z through the thickness.
+    # One unit for all three coordinates, so the bundles keep the material's
+    # own elongation whatever the muscle's proportions: ``bundles`` bundles
+    # across the mean width.
+    width = 2.0 * float(np.mean(half)) or 1.0
+    k = (bundles or DEFAULT_BUNDLES) / MATERIAL_CELLS_ACROSS / width
+    coords = np.stack([fibre_along, phase, r], axis=1) * k
     return coords, u
+
+
+def bundle_size(vertices, coords):
+    """World size of one unit of the fibre coordinates (Blender units per unit).
+
+    :arg vertices: World-space vertex positions, (N, 3).
+    :type vertices: :class:`numpy.ndarray`
+    :arg coords: Their fibre coordinates (:func:`fibre_coordinates`).
+    :type coords: :class:`numpy.ndarray`
+    :rtype: float
+    """
+    span_world = float(np.ptp(np.asarray(vertices), axis=0).max())
+    span_coord = float(np.ptp(coords[:, 0])) or 1.0
+    return span_world / span_coord / MATERIAL_CELLS_ACROSS
+
+
+def tendon_mask(u, origin_fraction, insertion_fraction):
+    """Tendon colour weight (0-1) along the muscle.
+
+    1 at each end, fading to 0 over ``origin_fraction`` / ``insertion_fraction``
+    of the length (smooth step); 0 fractions give no tendon at that end.
+
+    :arg u: Position along the path (0-1), per vertex.
+    :type u: :class:`numpy.ndarray`
+    :arg origin_fraction: Tendon length at the origin, fraction of the muscle.
+    :type origin_fraction: float
+    :arg insertion_fraction: Tendon length at the insertion.
+    :type insertion_fraction: float
+    :rtype: :class:`numpy.ndarray`
+    """
+    def fade(x, f):
+        if f <= 0.0:
+            return np.zeros_like(x)
+        t = np.clip(1.0 - x / f, 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+    return np.maximum(fade(u, origin_fraction), fade(1.0 - u, insertion_fraction))
 
 
 def _smooth(values, width):
@@ -201,9 +259,14 @@ def apply_fibre_texture(context, belly, arrangement=None, pennation_deg=None):
     mesh.vertices.foreach_get("co", co)
     m = np.array(belly.matrix_world)
     V = co.reshape(-1, 3) @ m[:3, :3].T + m[:3, 3]
-    coords, u = fibre_coordinates(V, tube.sample_path(path), arrangement, pennation_deg)
+    coords, u = fibre_coordinates(V, tube.sample_path(path), arrangement, pennation_deg,
+                                  belly.myogen_fibre_bundles)
+    tendon = tendon_mask(u, belly.myogen_tendon_origin, belly.myogen_tendon_insertion)
+    bump = np.full(len(u), bundle_size(V, coords) * BUMP_PER_BUNDLE)
     for name, kind, data, key in (("myo_fibre", 'FLOAT_VECTOR', coords, "vector"),
-                                  ("myo_fibre_u", 'FLOAT', u, "value")):
+                                  ("myo_fibre_u", 'FLOAT', u, "value"),
+                                  ("myo_tendon", 'FLOAT', tendon, "value"),
+                                  ("myo_bump", 'FLOAT', bump, "value")):
         attr = mesh.attributes.get(name)
         if attr is not None and (attr.data_type != kind or attr.domain != 'POINT'):
             mesh.attributes.remove(attr)
@@ -259,6 +322,20 @@ def register():
     bpy.types.Object.myogen_fibres = bpy.props.EnumProperty(
         name="Fibres", items=ARRANGEMENTS, default='FUSIFORM', update=_on_fibre_setting_changed,
         description="Fibre arrangement drawn by the muscle texture (visual only)")
+    bpy.types.Object.myogen_fibre_bundles = bpy.props.FloatProperty(
+        name="Bundles", default=DEFAULT_BUNDLES, min=2.0, soft_max=150.0, precision=0,
+        update=_on_fibre_setting_changed,
+        description="Fibre bundles drawn across the muscle's width: fewer = coarser bundles (visual only)")
+    bpy.types.Object.myogen_tendon_origin = bpy.props.FloatProperty(
+        name="Tendon at origin", default=DEFAULT_TENDON, min=0.0, max=0.5, subtype='FACTOR',
+        update=_on_fibre_setting_changed,
+        description="Length of the pale tendon colour at the origin end, as a fraction of the muscle "
+                    "(visual only; 0 = none)")
+    bpy.types.Object.myogen_tendon_insertion = bpy.props.FloatProperty(
+        name="Tendon at insertion", default=DEFAULT_TENDON, min=0.0, max=0.5, subtype='FACTOR',
+        update=_on_fibre_setting_changed,
+        description="Length of the pale tendon colour at the insertion end, as a fraction of the muscle "
+                    "(visual only; 0 = none)")
     bpy.types.Object.myogen_pennation = bpy.props.FloatProperty(
         name="Pennation (°)", default=DEFAULT_PENNATION, min=0.0, max=60.0, precision=0,
         update=_on_fibre_setting_changed,
@@ -268,6 +345,7 @@ def register():
 
 def unregister():
     """Remove the per-belly fibre settings."""
-    for name in ("myogen_fibres", "myogen_pennation"):
+    for name in ("myogen_fibres", "myogen_pennation", "myogen_fibre_bundles", "myogen_tendon_origin",
+                 "myogen_tendon_insertion"):
         if hasattr(bpy.types.Object, name):
             delattr(bpy.types.Object, name)

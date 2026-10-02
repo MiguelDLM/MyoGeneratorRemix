@@ -440,13 +440,27 @@ class SolidTest(unittest.TestCase):
         mid = np.array([any(g.group == free and g.weight > 0 for g in v.groups) for v in belly.data.vertices])
         belly.myogen_fibres = 'PARALLEL'                                   # recomputed at once
         par = fibre()[mid]
-        corr_par = abs(np.corrcoef(par[:, 0], par[:, 1])[0, 1])
+        corr_par = abs(np.corrcoef(par[:, 1], par[:, 0])[0, 1])        # phase (Y) vs along (X)
         belly.myogen_pennation = 30.0
         belly.myogen_fibres = 'PENNATE'
         pen = fibre()[mid]
-        corr_pen = abs(np.corrcoef(pen[:, 0], pen[:, 1])[0, 1])
+        corr_pen = abs(np.corrcoef(pen[:, 1], pen[:, 0])[0, 1])
         self.assertLess(corr_par, 0.3)                                    # phase independent of length
         self.assertGreater(corr_pen, corr_par + 0.2)                      # oblique fibres
+        # tendon colour: set per end
+        def tendon():
+            attr = belly.data.attributes["myo_tendon"]
+            v = np.empty(len(attr.data), dtype=np.float32)
+            attr.data.foreach_get("value", v)
+            u = np.empty(len(attr.data), dtype=np.float32)
+            belly.data.attributes["myo_fibre_u"].data.foreach_get("value", u)
+            return v, u
+        belly.myogen_tendon_origin, belly.myogen_tendon_insertion = 0.0, 0.2
+        t, u = tendon()
+        self.assertEqual(float(t[u < 0.05].max()), 0.0)                   # none at the origin
+        self.assertGreater(float(t[u > 0.95].min()), 0.1)                 # at the insertion
+        self.assertEqual(float(t[(u > 0.2) & (u < 0.75)].max()), 0.0)     # muscle in between
+        self.assertIsNotNone(belly.data.attributes.get("myo_bump"))
         props.muscle_shape = 'FAN'
         self.assertEqual(self.generate().myogen_fibres, 'CONVERGENT')
 

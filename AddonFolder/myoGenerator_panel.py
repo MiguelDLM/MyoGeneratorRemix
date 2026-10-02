@@ -66,6 +66,11 @@ def _draw_fibre_selector(layout, coll):
     row.prop(belly, "myogen_fibres", text="Texture")
     if belly.myogen_fibres in PENNATE:
         row.prop(belly, "myogen_pennation", text="")
+    row.prop(belly, "myogen_fibre_bundles", text="")
+    row = layout.row(align=True)
+    row.label(text="", icon='BLANK1')
+    row.prop(belly, "myogen_tendon_origin", text="Tendon O", slider=True)
+    row.prop(belly, "myogen_tendon_insertion", text="I", slider=True)
 
 
 def draw_qa_box(layout, context):
