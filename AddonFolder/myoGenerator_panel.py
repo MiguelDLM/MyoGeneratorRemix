@@ -55,6 +55,19 @@ def draw_units_box(layout, context):
         box.label(text="Run 'Check Muscles' to verify the scale", icon='INFO')
 
 
+def _draw_fibre_selector(layout, coll):
+    """Texture of a finished belly: fibre arrangement (and pennation angle)."""
+    belly = myo_record.resolve_objects(coll).get("belly")
+    if belly is None or belly.type != 'MESH':
+        return
+    from .fibre_texture import PENNATE
+    row = layout.row(align=True)
+    row.label(text="", icon='BLANK1')
+    row.prop(belly, "myogen_fibres", text="Texture")
+    if belly.myogen_fibres in PENNATE:
+        row.prop(belly, "myogen_pennation", text="")
+
+
 def draw_qa_box(layout, context):
     """Draw one line per muscle record with its PCSA and worst finding (details on demand).
 
@@ -81,9 +94,11 @@ def draw_qa_box(layout, context):
         line.alert = level == myo_record.QA_ERROR
         if level is None:
             line.label(text=f"{coll.name}: not measured yet", icon='QUESTION')
+            _draw_fibre_selector(box, coll)
             continue
         pcsa = f"{rec['myo_pcsa_m2'] * 1e4:.2f} cm²" if rec["has_pcsa"] else "no PCSA"
         line.label(text=f"{coll.name}: {pcsa}", icon=myo_record.LEVEL_ICONS[level])
+        _draw_fibre_selector(box, coll)
         if props.show_qa_details:
             col = box.column(align=True)
             col.scale_y = 0.8

@@ -14,6 +14,7 @@ Package layout (see `devdocs/ARCHITECTURE.md`):
 * `preview.py`                   - loft construction, path and attachment/bone geometry
 * `volume_builder.py`            - solid belly (tube or fan fibres along the path), live preview, final mesh
 * `fan.py`                       - fibres of fan-shaped muscles
+* `fibre_texture.py`             - muscle texture oriented by the fibre arrangement
 * `curve_utilities.py`           - path-curve validation, sampling and orientation frames
 * `muscle_utilities.py`          - selection helpers and contour alignment
 * `muscle_texture.py`            - procedural muscle material

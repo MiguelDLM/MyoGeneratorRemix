@@ -11,6 +11,7 @@ from . import myo_record
 from . import preview
 from . import rings
 from . import volume_builder
+from . import fibre_texture
 from .muscle_texture import apply_muscle_material
 
 
@@ -174,7 +175,10 @@ class Muscle_Mesh_Generation_Op(bpy.types.Operator):
         except ValueError as error:
             self.report({'ERROR'}, f"Final mesh failed: {error}")
             return {'CANCELLED'}
-        apply_muscle_material(belly)
+        props = context.scene.myogen
+        fibre_texture.set_defaults(belly, props)
+        if not fibre_texture.apply_fibre_texture(context, belly):
+            apply_muscle_material(belly)
         for obj in context.view_layer.objects:
             obj.select_set(False)
         belly.select_set(True)

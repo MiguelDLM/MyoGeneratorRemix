@@ -424,6 +424,32 @@ class SolidTest(unittest.TestCase):
         length = sum((b - a).length for a, b in zip(bent[:-1], bent[1:])) / 1000.0
         self.assertAlmostEqual(row["myo_path_length_m"], length, delta=0.02 * length)   # the user's path
 
+    def test_fibre_texture_follows_the_arrangement(self):
+        import numpy as np
+        props = bpy.context.scene.myogen
+        belly = self.generate()
+        self.assertEqual(belly.myogen_fibres, 'FUSIFORM')                  # default of the type
+        self.assertEqual(belly.data.materials[0].name, "Muscle (fibres)")
+
+        def fibre():
+            attr = belly.data.attributes["myo_fibre"]
+            v = np.empty(len(attr.data) * 3, dtype=np.float32)
+            attr.data.foreach_get("vector", v)
+            return v.reshape(-1, 3)
+        free = belly.vertex_groups[self.preview.DEFORM_GROUP].index
+        mid = np.array([any(g.group == free and g.weight > 0 for g in v.groups) for v in belly.data.vertices])
+        belly.myogen_fibres = 'PARALLEL'                                   # recomputed at once
+        par = fibre()[mid]
+        corr_par = abs(np.corrcoef(par[:, 0], par[:, 1])[0, 1])
+        belly.myogen_pennation = 30.0
+        belly.myogen_fibres = 'PENNATE'
+        pen = fibre()[mid]
+        corr_pen = abs(np.corrcoef(pen[:, 0], pen[:, 1])[0, 1])
+        self.assertLess(corr_par, 0.3)                                    # phase independent of length
+        self.assertGreater(corr_pen, corr_par + 0.2)                      # oblique fibres
+        props.muscle_shape = 'FAN'
+        self.assertEqual(self.generate().myogen_fibres, 'CONVERGENT')
+
     def test_regenerating_replaces_the_belly(self):
         first = self.generate()
         bpy.context.scene.myogen.muscle_shape = 'FAN'

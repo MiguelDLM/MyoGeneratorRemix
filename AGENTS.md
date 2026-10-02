@@ -20,6 +20,7 @@ generated in `devdocs/reference/`.
 | section rings on the path (slide, size, turn) | `AddonFolder/rings.py` |
 | solid belly (tube or fibres, bone subtraction, meshing), live preview, final mesh | `AddonFolder/volume_builder.py` |
 | fan-shaped muscles (fibres from the origin area to the insertion) | `AddonFolder/fan.py` |
+| muscle texture by fibre arrangement | `AddonFolder/fibre_texture.py`, `AddonFolder/muscle_texture.py` |
 | how loft contours are joined | `AddonFolder/contour_matching.py` (pure, unit-tested) |
 | volume of defective bellies | `myo_record.mesh_defects`, `robust_volume`, `enclosed_volume`, `winding_volume` |
 | settings | `AddonFolder/properties.py` (`scene.myogen`) |

@@ -23,6 +23,7 @@ Package layout (see ``devdocs/ARCHITECTURE.md``):
 * ``preview.py``                   - loft construction, path and attachment/bone geometry
 * ``volume_builder.py``            - solid belly (tube or fan fibres along the path), live preview, final mesh
 * ``fan.py``                       - fibres of fan-shaped muscles
+* ``fibre_texture.py``             - muscle texture oriented by the fibre arrangement
 * ``curve_utilities.py``           - path-curve validation, sampling and orientation frames
 * ``muscle_utilities.py``          - selection helpers and contour alignment
 * ``muscle_texture.py``            - procedural muscle material
@@ -43,6 +44,7 @@ from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
 from .properties import MyoGeneratorProperties
 from . import preview
 from . import volume_builder
+from . import fibre_texture
 from .improved_muscle_workflow import (Muscle_Edit_Path_Op,
                                      Muscle_Reset_Path_Op,
                                      Muscle_Select_Rings_Op,
@@ -111,9 +113,11 @@ def register():
     bpy.types.Scene.myogen = bpy.props.PointerProperty(type=MyoGeneratorProperties)
     preview.register()
     volume_builder.register()
+    fibre_texture.register()
 
 
 def unregister():
+    fibre_texture.unregister()
     volume_builder.unregister()
     preview.unregister()
     del bpy.types.Scene.myogen

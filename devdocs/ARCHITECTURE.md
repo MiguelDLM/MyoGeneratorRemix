@@ -28,7 +28,8 @@ MyoGeneratorRemix/
 │   ├── curve_utilities.py          path validation, Bezier sampling, twist-free frames
 │   ├── contour_matching.py         origin/insertion contour correspondence for the loft (pure)
 │   ├── muscle_utilities.py         selection helpers, contour alignment
-│   ├── muscle_texture.py           procedural muscle material (visual)
+│   ├── muscle_texture.py           procedural muscle materials (visual)
+│   ├── fibre_texture.py            fibre coordinates per arrangement for the texture (visual)
 │   ├── muscle_metrics.py           measurements, plausibility checks, CSV
 │   ├── myo_record.py               the muscle-record contract (shared with MUFIS)
 │   └── myoGenerator_panel.py       sidebar UI (drawing only)
@@ -177,6 +178,26 @@ and 14 cm³ (sculpt 59.6 cm³); Fan with the default thickness gives
 48.9 cm³, 3.2°, one closed piece, 64 % of the sculpt within 3 mm, in about
 1 s (preview) / 3.3 s (final).
 Fusiform on the same attachments: 27 cm³, two pieces, 59 %.
+
+### Fibre texture (`fibre_texture.py`, visual only)
+
+Each finished belly has a fibre arrangement (`Object.myogen_fibres`:
+Parallel, Fusiform, Convergent, Pennate, Bipennate, Multipennate) and a
+pennation angle for the pennate ones (`Object.myogen_pennation`), chosen in
+the muscle list (QA box). `fibre_texture.fibre_coordinates` measures every
+vertex along the path, across the section's width and through its
+thickness (width direction per section, kept for round sections and
+smoothed along the path) and writes the point attributes `myo_fibre`
+(phase, along, depth ÷ path length) and `myo_fibre_u` (0–1 along the path).
+Longitudinal arrangements use the angle around the section's axis (times a
+smoothed local radius for Parallel, a constant one for Fusiform/Convergent,
+so fibres converge as the section narrows); pennate ones use the position
+across the width from one side (Pennate), from the centre (Bipennate) or
+from several internal tendons (Multipennate), turned by the pennation
+angle. `muscle_texture.create_fibre_material` draws elongated bundles
+(Voronoi stretched along the fibres), striations, a bump and a tendon tint
+at the ends from those attributes. Generate Final Mesh picks the type's
+default (Fusiform → Fusiform, Parallel → Parallel, Fan → Convergent).
 
 ### Contour correspondence (`contour_matching.py`)
 
