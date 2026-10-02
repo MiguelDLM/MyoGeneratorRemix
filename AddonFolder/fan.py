@@ -208,6 +208,43 @@ def fibres(path_points, origin_surface, insertion_surface, bones, count, thickne
     return courses, radii, natural
 
 
+#: Fibres used to measure the natural fan (for the rings).
+NATURAL_FIBRES = 60
+
+
+def natural_profile(path_points, origin_surface, insertion_surface, bones):
+    """The fan's natural section along the path, as used by the rings.
+
+    :arg path_points: Arc-length samples of the path.
+    :type path_points: list of :class:`mathutils.Vector`
+    :arg origin_surface: Origin attachment surface.
+    :type origin_surface: :class:`bpy.types.Object`
+    :arg insertion_surface: Insertion attachment surface.
+    :type insertion_surface: :class:`bpy.types.Object`
+    :arg bones: ``(origin_bone, insertion_bone)``.
+    :type bones: sequence of :class:`bpy.types.Object`
+    :return: ``natural(u) -> (half_width, half_thickness, angle)``: the fan's
+       half-width along its widest direction, the default half-thickness and
+       the angle of the widest direction about the path.
+    :rtype: callable
+    """
+    _c, _r, nat = fibres(path_points, origin_surface, insertion_surface, bones, NATURAL_FIBRES)
+    h = default_thickness(path_points)
+    us = [n[0] for n in nat]
+    widths = [n[1] for n in nat]
+    angles = [nat[0][2]]
+    for _u, _w, a in nat[1:]:                                   # unwrap (the widest direction repeats every π)
+        while a - angles[-1] > math.pi / 2:
+            a -= math.pi
+        while a - angles[-1] < -math.pi / 2:
+            a += math.pi
+        angles.append(a)
+
+    def natural(u):
+        return (max(float(np.interp(u, us, widths)), h(u)), h(u), float(np.interp(u, us, angles)))
+    return natural
+
+
 def occupancy(courses, radii, xs, ys, zs):
     """Voxels within each fibre's radius of its course (union of capsules).
 

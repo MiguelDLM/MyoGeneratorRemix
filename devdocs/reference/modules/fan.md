@@ -37,6 +37,7 @@ equal to the local half-thickness of the muscle.
 | `STAMP_CHUNK` | `2000` |
 | `THICKNESS_FRACTION` | `0.08` |
 | `THICKNESS_BELLY` | `0.3` |
+| `NATURAL_FIBRES` | `60` |
 
 ## Functions
 
@@ -88,6 +89,19 @@ extent axis by axis.
 **Returns** (tuple): `(courses, radii, natural)`: `courses` is an array (fibres, `FIBRE_SAMPLES`, 3) of world-space points, `radii` an array (`FIBRE_SAMPLES`,) of half-thicknesses, and `natural` a list of `(u, half_width, angle)` of the natural fan (for default rings).
 
 **Raises** `ValueError`: If an attachment has no faces.
+
+### `natural_profile(path_points, origin_surface, insertion_surface, bones)`
+
+The fan's natural section along the path, as used by the rings.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `path_points` | list of `mathutils.Vector` | Arc-length samples of the path. |
+| `origin_surface` | `bpy.types.Object` | Origin attachment surface. |
+| `insertion_surface` | `bpy.types.Object` | Insertion attachment surface. |
+| `bones` | sequence of `bpy.types.Object` | `(origin_bone, insertion_bone)`. |
+
+**Returns** (callable): `natural(u) -> (half_width, half_thickness, angle)`: the fan's half-width along its widest direction, the default half-thickness and the angle of the widest direction about the path.
 
 ### `occupancy(courses, radii, xs, ys, zs)`
 

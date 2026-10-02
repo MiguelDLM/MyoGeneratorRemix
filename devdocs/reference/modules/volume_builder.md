@@ -200,13 +200,25 @@ operator).
 
 **Returns** (`bpy.types.Object`): 
 
+### `natural_section(context, objs, points)`
+
+The muscle's section along the path without rings, for the current type.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `context` | `bpy.types.Context` | Context (`scene.myogen`: type, bones). |
+| `objs` | dict | Muscle objects (attachments). |
+| `points` | list of `mathutils.Vector` | Arc-length samples of the path. |
+
+**Returns** (callable): `natural(u) -> (half_width, half_thickness, angle)`.
+
 ### `muscle_sections(context, muscle_name, coll, objs, path, points)`
 
-Sections of the belly along the path: from the rings, or the type's default profile.
+Sections of the belly along the path: from the rings, or the natural ones.
 
-With *Shape with rings* on, the rings are created when missing: for a
-belly from the type's profile (`tube.default_profile`), for a fan
-from its natural width, thickness and orientation (`fan.fibres`).
+With *Shape with rings* on, the rings are created when missing (they then
+show the natural section) and their changes relative to the natural
+section give the sections (`rings.ring_sections`).
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -219,17 +231,16 @@ from its natural width, thickness and orientation (`fan.fibres`).
 
 **Returns** (tuple): `(sections, rings)`; `sections` is None for a fan without rings (natural fan); `rings` is empty when rings are off.
 
-### `natural_fan_sections(context, objs, points)`
+### `reset_rings(context, muscle_name)`
 
-Ring sections `(u, half_width, half_thickness, angle)` of the natural fan.
+Replace the rings with `ring_count` untouched rings (natural section).
 
 | Parameter | Type | Description |
 |---|---|---|
-| `context` | `bpy.types.Context` | Context (`scene.myogen`: bones, ring count). |
-| `objs` | dict | Muscle objects (attachments). |
-| `points` | list of `mathutils.Vector` | Arc-length samples of the path. |
+| `context` | `bpy.types.Context` | Context. |
+| `muscle_name` | str | Muscle name. |
 
-**Returns** (list of tuple): 
+**Raises** `ValueError`: If an attachment is missing.
 
 ### `solid_mesh(context, muscle_name, report=None, voxel_scale=1.0)`
 

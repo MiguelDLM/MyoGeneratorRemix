@@ -172,7 +172,7 @@ _No parameters._
 
 ### `bpy.ops.myogen.reset_rings()`
 
-**Reset Rings** — Replace the rings with the number set below, evenly spaced along the path and sized by the muscle type
+**Reset Rings** — Replace the rings with the number set below, evenly spaced along the path and showing the muscle's natural shape (no change)
 
 Replace the rings with evenly spaced default ones
 

@@ -138,23 +138,20 @@ class Muscle_Reset_Rings_Op(bpy.types.Operator):
     """Replace the rings with evenly spaced default ones"""
     bl_idname = "myogen.reset_rings"
     bl_label = "Reset Rings"
-    bl_description = ("Replace the rings with the number set below, evenly spaced along the path and sized "
-                      "by the muscle type")
+    bl_description = ("Replace the rings with the number set below, evenly spaced along the path and showing "
+                      "the muscle's natural shape (no change)")
 
     @classmethod
     def poll(cls, context):
         return context.scene.myogen.use_controls
 
     def execute(self, context):
-        coll, objs = preview.muscle_objects(context)
-        if coll is None or objs.get("origin") is None or objs.get("insertion") is None:
-            self.report({'ERROR'}, "Origin and insertion surfaces are required")
-            return {'CANCELLED'}
         _object_mode(context)
-        props = context.scene.myogen
-        path = volume_builder.ensure_path(context, props.muscle_name, coll, objs)
-        rings.default_rings(coll, props.muscle_name, path, objs["origin"], objs["insertion"],
-                            props.muscle_shape, props.ring_count)
+        try:
+            volume_builder.reset_rings(context, context.scene.myogen.muscle_name)
+        except ValueError as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
         volume_builder.schedule_rebuild(context)
         return {'FINISHED'}
 

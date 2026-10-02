@@ -17,10 +17,13 @@ ring (`tube.path_tube`):
 * **S** scales a ring (S X X width, S Y Y thickness: local axes);
 * **R** turns it about the path (the width direction).
 
-Each ring is a circle of radius 1 (local XY plane), so its X and Y scales are
-the section radii in Blender units. After every rebuild the rings are put
-back perpendicular to the path at their position (`align_rings`),
-keeping their size and turn.
+Rings store changes **relative to the muscle's natural section** (the
+muscle type's profile, or the natural width, thickness and orientation of a
+fan): an untouched ring changes nothing, scaling one ×1.5 makes the section
+1.5 times its natural size there, turning it turns the section from its
+natural orientation (`ring_sections`). Each ring is a circle of radius
+1 (local XY plane) drawn at the actual section size; after every rebuild the
+rings are shown again on the path, perpendicular to it (`align_rings`).
 
 ## Constants
 
@@ -30,6 +33,9 @@ keeping their size and turn.
 | `RING_ROLE` | `'ring'` |
 | `RING_CURVE` | `'MyoGen ring'` |
 | `RING_COLOR` | `(1.0, 0.5, 0.05, 1.0)` |
+| `SCALE_KEY` | `'myo_ring_scale'` |
+| `TURN_KEY` | `'myo_ring_turn'` |
+| `SHOWN_KEY` | `'myo_ring_shown'` |
 
 ## Functions
 
@@ -64,61 +70,74 @@ Delete all of the muscle's rings (and the shared ring curve once unused).
 | `collection` | `bpy.types.Collection` | Muscle collection. |
 | `muscle_name` | str | Muscle name. |
 
-### `create_rings(collection, muscle_name, path_obj, sections)`
+### `create_rings(collection, muscle_name, path_obj, us, natural)`
 
-Replace the muscle's rings with one ring per section, placed on the path.
+Replace the muscle's rings with rings at `us` showing the natural section.
+
+A new ring changes nothing: its stored scale is (1, 1) and its turn 0
+(see `ring_sections`).
 
 | Parameter | Type | Description |
 |---|---|---|
 | `collection` | `bpy.types.Collection` | Muscle collection. |
 | `muscle_name` | str | Muscle name. |
 | `path_obj` | `bpy.types.Object` | The muscle path. |
-| `sections` | list of tuple | `(u, width, thickness, twist)`; the first and last are put at the ends of the path (u = 0 and 1). |
+| `us` | list of float | Arc-length fractions; the first and last are put at 0 and 1. |
+| `natural` | callable | `natural(u) -> (half_width, half_thickness, angle)` of the muscle without rings. |
 
 **Returns** (list of `bpy.types.Object`): The rings, origin to insertion.
 
-### `default_rings(collection, muscle_name, path_obj, origin_surface, insertion_surface, shape, count)`
+### `default_rings(collection, muscle_name, path_obj, natural, count)`
 
-Replace the rings with `count` rings evenly spaced along the path,
-sized by the muscle type's default profile.
+Replace the rings with `count` rings evenly spaced along the path.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `collection` | `bpy.types.Collection` | Muscle collection. |
 | `muscle_name` | str | Muscle name. |
 | `path_obj` | `bpy.types.Object` | The muscle path. |
-| `origin_surface` | `bpy.types.Object` | Origin attachment surface. |
-| `insertion_surface` | `bpy.types.Object` | Insertion attachment surface. |
-| `shape` | str | Muscle type. |
+| `natural` | callable | See `create_rings`. |
 | `count` | int | Number of rings (≥ 2). |
 
 **Returns** (list of `bpy.types.Object`): 
 
-### `ring_sections(rings, points)`
+### `ring_sections(rings, points, natural)`
 
-Sections `(u, width, thickness, twist)` given by the rings on a sampled path.
+Sections `(u, half_width, half_thickness, twist)` set by the rings.
+
+A ring stores a change relative to the muscle's natural section
+(`natural(u)`, which depends on the muscle type): a scale (X width,
+Y thickness) and a turn. A ring the user has not touched gives the
+natural section exactly, whatever the type. When the user scales or
+turns a ring, the change from what was last shown (`align_rings`)
+multiplies the stored scale / adds to the stored turn, once: the current
+state becomes the shown one, so reading the rings again changes nothing.
+Rings without stored values (earlier versions) start from the natural
+section.
 
 `u` is the arc-length fraction of the path point nearest to the ring;
-the end rings are always at 0 and 1. Width and thickness are the ring's
-X and Y scales; the twist is the angle of its X axis about the path,
-from the path's parallel-transported normal.
+the end rings are always at 0 and 1.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `rings` | list of `bpy.types.Object` | Ring objects (origin to insertion by name). |
 | `points` | list of `mathutils.Vector` | Arc-length samples of the path (`tube.sample_path`). |
+| `natural` | callable | `natural(u) -> (half_width, half_thickness, angle)`. |
 
 **Returns** (list of tuple): 
 
-### `align_rings(rings, points, sections=None)`
+### `align_rings(rings, points, sections)`
 
-Put the rings back on the path, perpendicular to it, keeping size and turn.
+Show the rings on the path, perpendicular to it, at their section's size and turn.
+
+What is shown is remembered (`SHOWN_KEY`) so later user changes can be
+told apart (`ring_sections`).
 
 | Parameter | Type | Description |
 |---|---|---|
 | `rings` | list of `bpy.types.Object` | Ring objects. |
 | `points` | list of `mathutils.Vector` | Arc-length samples of the path. |
-| `sections` | list of tuple | Their current sections (`ring_sections`), or None. |
+| `sections` | list of tuple | Their sections `(u, half_width, half_thickness, twist)`. |
 
 ### `set_visible(collection, muscle_name, visible)`
 

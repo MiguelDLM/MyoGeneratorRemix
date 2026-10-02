@@ -307,6 +307,42 @@ class SolidTest(unittest.TestCase):
         self.assertGreater(width1, width0 * 1.2)
         self.assertEqual(bpy.ops.myogen.muscle_preview_stop(), {'FINISHED'})
 
+    def test_untouched_rings_keep_the_natural_shape(self):
+        """Rings store changes relative to the natural section: untouched rings change nothing,
+        and switching type keeps the change without inflating the section."""
+        props = bpy.context.scene.myogen
+        props.muscle_shape = 'FAN'
+        self.assertEqual(bpy.ops.myogen.muscle_preview_update(), {'FINISHED'})
+        preview_obj = self.coll.objects[M + self.vb.PREVIEW_SUFFIX]
+        plain = len(preview_obj.data.vertices)
+        bm = _bm(preview_obj)
+        plain_volume = bm.calc_volume(signed=True)
+        bm.free()
+        props.use_controls = True                                    # untouched rings: same fan
+        self.assertTrue(self.vb.flush_live(bpy.context))
+        bm = _bm(preview_obj)
+        self.assertAlmostEqual(bm.calc_volume(signed=True) / plain_volume, 1.0, delta=0.03)
+        bm.free()
+        middle = self.rings.ring_objects(self.coll, M)[1]
+        middle.scale = (middle.scale.x * 1.5, middle.scale.y, 1.0)
+        bpy.context.view_layer.update()
+        self.assertTrue(self.vb.flush_live(bpy.context))
+        self.assertAlmostEqual(tuple(middle[self.rings.SCALE_KEY])[0], 1.5, delta=0.01)
+        props.muscle_shape = 'FUSIFORM'                              # the relative change follows the type
+        self.assertTrue(self.vb.flush_live(bpy.context))
+        self.assertAlmostEqual(tuple(middle[self.rings.SCALE_KEY])[0], 1.5, delta=0.01)
+        pts = self.tube.sample_path(self.coll.objects[M + "_curve"])
+        natural = self.vb.natural_section(bpy.context, self.preview.muscle_objects(bpy.context)[1], pts)
+        u, w, h, _twist = self.rings.ring_sections(self.rings.ring_objects(self.coll, M), pts, natural)[1]
+        w0, h0, _a = natural(u)
+        self.assertAlmostEqual(w / w0, 1.5, delta=0.02)
+        self.assertAlmostEqual(h / h0, 1.0, delta=0.02)
+        self.assertEqual(bpy.ops.myogen.muscle_preview_stop(), {'FINISHED'})
+
+    def ring_u(self, pts):
+        natural = self.vb.natural_section(bpy.context, self.preview.muscle_objects(bpy.context)[1], pts)
+        return self.rings.ring_sections(self.rings.ring_objects(self.coll, M), pts, natural)[1][0]
+
     @staticmethod
     def move_to(obj, location):
         m = obj.matrix_world.copy()
@@ -348,7 +384,7 @@ class SolidTest(unittest.TestCase):
         self.move_to(middle, pts[round(0.25 * (len(pts) - 1))])
         bpy.context.view_layer.update()
         self.assertTrue(self.vb.flush_live(bpy.context))
-        u = self.rings.ring_sections(self.rings.ring_objects(self.coll, M), pts)[1][0]
+        u = self.ring_u(pts)
         self.assertAlmostEqual(u, 0.25, delta=0.05)
         self.assertGreater(self.size_near(preview_obj, path, 0.25), self.size_near(preview_obj, path, 0.7) * 1.3)
 
@@ -357,7 +393,7 @@ class SolidTest(unittest.TestCase):
         self.assertTrue(self.vb.flush_live(bpy.context))           # snapped back onto it, same place
         on_path = min((middle.matrix_world.translation - p).length for p in pts)
         self.assertLess(on_path, 1.0)
-        u = self.rings.ring_sections(self.rings.ring_objects(self.coll, M), pts)[1][0]
+        u = self.ring_u(pts)
         self.assertAlmostEqual(u, 0.25, delta=0.05)
 
         for bp in path.data.splines[0].bezier_points:                 # bend the path: the belly follows

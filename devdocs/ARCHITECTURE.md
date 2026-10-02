@@ -77,8 +77,15 @@ Calculate & Export CSV   myogen.calculate_muscle_parameters   same + <folder>/<f
    when missing and never rewritten automatically. It is also the path used
    for path length → fibre length → PCSA.
 2. **Sections**: with *Shape with rings* (`use_controls`, off by default)
-   rings `<M>_ring_NN` (`rings.py`) give the section size (X/Y scale) and
-   turn at their place on the path; the end rings stay at the path ends and
+   rings `<M>_ring_NN` (`rings.py`) change the section at their place on
+   the path **relative to the muscle's natural section**
+   (`volume_builder.natural_section`: the type's profile, or the natural
+   width, thickness and orientation of a fan): each ring stores a scale
+   (X width, Y thickness) and a turn (`myo_ring_scale`, `myo_ring_turn`);
+   an untouched ring changes nothing, and switching type keeps the change
+   without inflating the section. Rings are drawn at the actual section
+   size; a user edit is detected against what was last shown
+   (`myo_ring_shown`) and absorbed once; the end rings stay at the path ends and
    the others slide: a ring acts at the path point nearest to it
    (`rings.ring_sections`, arc-length fraction `u`) and is snapped back onto
    the path, perpendicular to it, after each rebuild (`rings.align_rings`).

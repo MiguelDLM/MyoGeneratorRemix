@@ -584,12 +584,32 @@ def ensure_path(context, muscle_name, coll, objs):
     return path
 
 
-def muscle_sections(context, muscle_name, coll, objs, path, points):
-    """Sections of the belly along the path: from the rings, or the type's default profile.
+def natural_section(context, objs, points):
+    """The muscle's section along the path without rings, for the current type.
 
-    With *Shape with rings* on, the rings are created when missing: for a
-    belly from the type's profile (:func:`tube.default_profile`), for a fan
-    from its natural width, thickness and orientation (:func:`fan.fibres`).
+    :arg context: Context (``scene.myogen``: type, bones).
+    :type context: :class:`bpy.types.Context`
+    :arg objs: Muscle objects (attachments).
+    :type objs: dict
+    :arg points: Arc-length samples of the path.
+    :type points: list of :class:`mathutils.Vector`
+    :return: ``natural(u) -> (half_width, half_thickness, angle)``.
+    :rtype: callable
+    """
+    props = context.scene.myogen
+    if is_fan(props):
+        return fan.natural_profile(points, objs["origin"], objs["insertion"],
+                                   (props.origin_object, props.insertion_object))
+    profile = tube.default_profile(objs["origin"], objs["insertion"], props.muscle_shape)
+    return lambda u: tube._interp_sections(profile, u)
+
+
+def muscle_sections(context, muscle_name, coll, objs, path, points):
+    """Sections of the belly along the path: from the rings, or the natural ones.
+
+    With *Shape with rings* on, the rings are created when missing (they then
+    show the natural section) and their changes relative to the natural
+    section give the sections (:func:`rings.ring_sections`).
 
     :arg context: Context.
     :type context: :class:`bpy.types.Context`
@@ -608,42 +628,32 @@ def muscle_sections(context, muscle_name, coll, objs, path, points):
     :rtype: tuple
     """
     props = context.scene.myogen
-    fan_type = is_fan(props)
     if not props.use_controls:
-        return (None if fan_type else tube.default_profile(objs["origin"], objs["insertion"],
-                                                           props.muscle_shape)), []
+        return (None if is_fan(props) else tube.default_profile(objs["origin"], objs["insertion"],
+                                                                props.muscle_shape)), []
+    natural = natural_section(context, objs, points)
     ring_list = rings.ring_objects(coll, muscle_name)
     if len(ring_list) < 2:
-        if fan_type:
-            ring_list = rings.create_rings(coll, muscle_name, path, natural_fan_sections(context, objs, points))
-        else:
-            ring_list = rings.default_rings(coll, muscle_name, path, objs["origin"], objs["insertion"],
-                                            props.muscle_shape, props.ring_count)
-    return rings.ring_sections(ring_list, points), ring_list
+        ring_list = rings.default_rings(coll, muscle_name, path, natural, props.ring_count)
+    return rings.ring_sections(ring_list, points, natural), ring_list
 
 
-def natural_fan_sections(context, objs, points):
-    """Ring sections ``(u, half_width, half_thickness, angle)`` of the natural fan.
+def reset_rings(context, muscle_name):
+    """Replace the rings with ``ring_count`` untouched rings (natural section).
 
-    :arg context: Context (``scene.myogen``: bones, ring count).
+    :arg context: Context.
     :type context: :class:`bpy.types.Context`
-    :arg objs: Muscle objects (attachments).
-    :type objs: dict
-    :arg points: Arc-length samples of the path.
-    :type points: list of :class:`mathutils.Vector`
-    :rtype: list of tuple
+    :arg muscle_name: Muscle name.
+    :type muscle_name: str
+    :raises ValueError: If an attachment is missing.
     """
-    props = context.scene.myogen
-    _c, _r, natural = fan.fibres(points, objs["origin"], objs["insertion"],
-                                 (props.origin_object, props.insertion_object), fan.DRAFT_FIBRES)
-    h = fan.default_thickness(points)
-    count = max(2, props.ring_count)
-    secs = []
-    for k in range(count):
-        u = k / (count - 1)
-        j = min(range(len(natural)), key=lambda i: abs(natural[i][0] - u))
-        secs.append((u, max(natural[j][1], h(u)), h(u), natural[j][2]))
-    return secs
+    coll, objs = preview.muscle_objects(context, muscle_name)
+    if coll is None or objs.get("origin") is None or objs.get("insertion") is None:
+        raise ValueError("origin and insertion surfaces are required")
+    path = ensure_path(context, muscle_name, coll, objs)
+    points = tube.sample_path(path)
+    rings.default_rings(coll, muscle_name, path, natural_section(context, objs, points),
+                        context.scene.myogen.ring_count)
 
 
 def _inputs(context, muscle_name):
