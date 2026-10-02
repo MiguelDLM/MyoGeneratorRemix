@@ -28,7 +28,6 @@ acts away from the ends (`anchor_weight`). The final belly keeps
 | `DEFORM_GROUP` | `'myo_deform'` |
 | `ANCHORED_GROUP` | `'myo_anchored'` |
 | `SHAPE_PRESETS` | `{'FUSIFORM': (0.35, 0.5, 0.75), 'PARALLEL': (0.0, 0.5, 0.5), 'FAN': (0.15, 0.65, 0.35),...` |
-| `SPACE_FILLING_SHAPES` | `{'FAN', 'SHEET'}` |
 | `FLATNESS_RAMP` | `0.3` |
 | `_RAY` | `Vector((0.31, 0.57, 0.76)).normalized()` |
 | `_RAYS` | `(_RAY, Vector((-0.83, 0.21, 0.52)).normalized(), Vector((0.17, -0.94, 0.29)).normalized...` |

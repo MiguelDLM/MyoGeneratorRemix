@@ -23,7 +23,8 @@ MyoGeneratorRemix/
 │   ├── preview.py                  attachment/bone geometry, default course, path writing (+ legacy loft)
 │   ├── tube.py                     path sampling (arc length) and the tube swept along the path
 │   ├── rings.py                    section rings sliding on the path (size, turn)
-│   ├── volume_builder.py           solid final belly: (loft or fossa fill ∪ attachments) − bones
+│   ├── volume_builder.py           solid belly: (tube or fan fibres ∪ attachment layers) − bones
+│   ├── fan.py                      fibres of fan-shaped muscles (origin area → insertion)
 │   ├── curve_utilities.py          path validation, Bezier sampling, twist-free frames
 │   ├── contour_matching.py         origin/insertion contour correspondence for the loft (pure)
 │   ├── muscle_utilities.py         selection helpers, contour alignment
@@ -57,11 +58,10 @@ Submit Origin            myogen.submit_origin            <M>_origin (faces) + <M
 (same for the insertion) myogen.select_insertion / submit_insertion
 Start / Stop Preview     myogen.muscle_preview_update    <M>_preview (solid, draft) + <M>_tube (wire, instant);
                          myogen.muscle_preview_stop      the default path <M>_curve is created if missing
-Muscle type              scene.myogen.muscle_shape       Fusiform / Parallel / Fan / Sheet (default profile)
+Muscle type              scene.myogen.muscle_shape       Fusiform / Parallel (tube) · Fan (fibres)
 Edit / Reset Path        myogen.edit_path, reset_path    the course of the belly (user's curve)
 Shape with rings         scene.myogen.use_controls       rings on the path: G slides, S sizes, R turns
 Select / Reset Rings     myogen.select_rings, reset_rings
-Select / Submit Fossa    myogen.select_fossa, submit_fossa  Fan / Sheet: optional <M>_fossa region
 Generate Final Mesh      myogen.muscle_mesh_generation   <M>_muscle at full resolution, anchored vertices
                                                          protected; preview, tube and rings removed,
                                                          path kept
@@ -85,12 +85,24 @@ Calculate & Export CSV   myogen.calculate_muscle_parameters   same + <folder>/<f
    Without rings, the muscle type's profile (`tube.default_profile`).
 3. **Tube** (`tube.path_tube`): the path sampled by arc length
    (`tube.sample_path`), parallel-transported frames, sections blended
-   smoothly between their `u`; Fan and Sheet add the fossa fill.
+   smoothly between their `u`.
+   **Fan** (`fan.py`): instead of a tube, the union of fibres, one from
+   every part of the origin attachment (`fan.sample_surface`, lifted off
+   the bone by the half-thickness) to the matching part of the insertion
+   (footprints matched in one fixed frame, scaled to each other's extent);
+   each fibre runs straight from start to end plus the path's bend (its
+   offset from its chord), so the fibres curve with the path, converge and
+   never twist around each other. Rings set the fan's width (X, along
+   its widest direction), half-thickness (Y) and turn; without rings the
+   natural width and `fan.default_thickness` (0.08 × path length, +30 %
+   in the middle). Fibres are rasterised as spheres along their courses
+   (`fan.occupancy`). The origin attachment should be the whole area the
+   muscle arises from (e.g. the temporal fossa, the sternum and clavicle).
 4. **Preview** (`volume_builder.start_live`): a wire `<M>_tube` refreshed
    `TUBE_DELAY` s after a change (instant feedback while dragging) and the
    solid `<M>_preview` at draft resolution `LIVE_DELAY` s after the last
    change. Changes are detected by a `depsgraph_update_post` handler that
-   compares a signature of the path, rings, attachments and fossa
+   compares a signature of the path, rings and attachments
    (`_state`) with the one left by the last rebuild, so the rebuild's own
    edits (ring snapping) do not loop; settings call
    `volume_builder.on_setting_changed`.
@@ -132,13 +144,15 @@ the muscle type gives the belly.
 ### Solid final belly (`volume_builder.py`)
 
 The preview and `Generate Final Mesh` build the belly on a voxel grid
-(`voxel_size_mm`; automatic = 1/110 of the muscle, 1/150 for Fill fossa):
+(`voxel_size_mm`; automatic = 1/110 of the muscle, at most the thinnest
+section radius / 6, or the fibre radius / 3 for fans; never more than
+`MAX_CELLS` cells):
 
-| method | body |
+| step | |
 |---|---|
-| Fan, Sheet | ∪ the space the muscle fills: the convex envelope of the bone around the origin (`fossa_points`: bone within `fossa_radius_mm` of the origin facing the same side, or the user's `<M>_fossa` selection), bulged out or sunk in by `fascia_bulge_mm` where it spans a deep fossa (`fascia_envelope`), Gaussian-smoothed by `surface_smoothing_mm` **before** the bone is cut (so the face on the bone stays exact) |
-| all types | the base tube (winding number: self-overlaps are a union) |
-| both | ∪ a layer over each attachment, up to `attachment_thickness_mm` outwards (`attachment_layer`: voxels within that distance of the attachment and inside a 60° cone of its outward normal, so it never folds; automatic 3 voxels), − the origin and insertion bones (ray parity, scanlines along +Z) |
+| body | the tube (winding number: self-overlaps are a union) or the fan fibres, Gaussian-smoothed by `surface_smoothing_mm` **before** the bones are cut (so the face on the bone stays exact) |
+| attachments | ∪ a layer over each attachment, up to `attachment_thickness_mm` outwards (`attachment_layer`: voxels within that distance of the attachment and inside a 60° cone of its outward normal, so it never folds; automatic 3 voxels) |
+| bones | − the origin and insertion bones (ray parity, scanlines along +Z) |
 
 The field is meshed by surface nets and rebuilt by Blender's voxel remesher
 (`manifold_remesh`, always closed and manifold); vertices within one voxel of
@@ -150,11 +164,12 @@ free surface is smoothed (`SMOOTH_PASSES`) and pushed out of the bones by
 contact, not penetration (`preview.DIAGNOSIS_CONTACT_MM`).
 
 Reference (Canis temporalis superficialis, compared with the hand-sculpted
-muscle of the same specimen, aligned on the cranium): the loft preview had a
-mean dihedral angle of 17° (sculpt 3.4°) and 14 cm³ (sculpt 59.6 cm³);
-Fill fossa with the region under the sculpt as `<M>_fossa` and bulge −4 mm
-gives 58 cm³, 3.3°, one closed piece, 57 % of the sculpt within 3 mm, in
-~8 s.
+muscle of the same specimen, aligned on the cranium; origin = the bone under
+the sculpt): the former loft had a mean dihedral angle of 17° (sculpt 3.4°)
+and 14 cm³ (sculpt 59.6 cm³); Fan with the default thickness gives
+48.9 cm³, 3.2°, one closed piece, 64 % of the sculpt within 3 mm, in about
+1 s (preview) / 3.3 s (final).
+Fusiform on the same attachments: 27 cm³, two pieces, 59 %.
 
 ### Contour correspondence (`contour_matching.py`)
 

@@ -21,7 +21,8 @@ Package layout (see ``devdocs/ARCHITECTURE.md``):
 * ``tube.py``                      - path sampling and the tube swept along it
 * ``rings.py``                     - section rings sliding on the path (size, turn)
 * ``preview.py``                   - loft construction, path and attachment/bone geometry
-* ``volume_builder.py``            - solid belly (fill fossa / along the path), live preview, final mesh
+* ``volume_builder.py``            - solid belly (tube or fan fibres along the path), live preview, final mesh
+* ``fan.py``                       - fibres of fan-shaped muscles
 * ``curve_utilities.py``           - path-curve validation, sampling and orientation frames
 * ``muscle_utilities.py``          - selection helpers and contour alignment
 * ``muscle_texture.py``            - procedural muscle material
@@ -35,7 +36,6 @@ import bpy
 from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
                             Select_Insertion_Op, Submit_Origin_Op,
                             Submit_Insertion_Op, Next_Muscle_Op,
-                            Select_Fossa_Op, Submit_Fossa_Op, Remove_Fossa_Op,
                             Calculate_Muscle_Parameters_Op,
                             Check_Muscles_Op, Set_Unit_Scale_Op,
                             MYOGENERATOR_OT_mirror_duplicate,
@@ -88,9 +88,6 @@ classes = (
     Select_Insertion_Op,
     Submit_Origin_Op,
     Submit_Insertion_Op,
-    Select_Fossa_Op,
-    Submit_Fossa_Op,
-    Remove_Fossa_Op,
     Calculate_Muscle_Parameters_Op,
     Check_Muscles_Op,
     Set_Unit_Scale_Op,

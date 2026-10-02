@@ -169,6 +169,8 @@ class SolidTest(unittest.TestCase):
         props.muscle_name = M
         props.origin_object, props.insertion_object = self.skull, self.post
         props.muscle_shape = 'FUSIFORM'
+        props.use_controls = False
+        props.ring_count = 3
         props.voxel_size_mm = 0.6
         props.attachment_thickness_mm = 0.0
         props.muscle_contour_resolution = 32
@@ -260,64 +262,50 @@ class SolidTest(unittest.TestCase):
         self.assertTrue(inside(tree, Vector((0, 0, 20))))       # belly between the attachments
         self.assertFalse(inside(tree, Vector((0, 0, 6))))       # the process stays bone
 
-    def test_fossa_fills_between_the_crests(self):
-        props = bpy.context.scene.myogen
-        props.muscle_shape = 'FAN'                              # Fill fossa
-        self.assertTrue(self.vb.uses_fossa(props))
-        props.fossa_radius_mm = 12.0
-        props.fascia_bulge_mm = 0.0
-        belly = self.generate()
-        pts = self.path_points()                                  # the path, used by the metrics
-        self.assertLess(abs(pts[0].z - 40.0), 2.0)              # starts at the origin (z = 40)
-        self.assertLess(abs(pts[-1].z - 8.0), 4.0)              # ends at the process top (z = 8)
-        rows, _scene = sys.modules[f"{test_metrics.MODULE_NAME}.muscle_metrics"].compute_muscles(bpy.context)
-        row = next(r for r in rows if r["collection"] == M)
-        straight = (pts[-1] - pts[0]).length / 1000.0
-        self.assertGreater(row["myo_path_length_m"], straight * 0.99)
-        self.assertLess(row["myo_path_length_m"], straight * 1.5)
-        tree = self.assert_solid(belly)
-        self.assertTrue(inside(tree, Vector((0, 0, 36))))       # the fossa is filled
-        self.assertFalse(inside(tree, Vector((8, 0, 30))))      # not beyond the crests (no bulge; off the tendon)
-        self.assertFalse(inside(tree, Vector((13, 0, 36))))     # the crest stays bone
-        for side in (Vector((2.2, 0, 5)), Vector((-2.2, 0, 5)), Vector((0, 2.2, 5)), Vector((0, -2.2, 5))):
-            self.assertTrue(inside(tree, side), f"process side {side} not covered")
-        self.assertFalse(inside(tree, Vector((0, 0, 6))))       # the process stays bone
-        self.assertTrue(inside(tree, Vector((0, 0, 20))))       # tendon joins mass and insertion
-        islands = self.vb._islands(_bm(belly))
-        self.assertEqual(len(islands), 1)
+    def fan_extent(self, obj, z, axis):
+        """Extent of ``obj`` along world ``axis`` (0 = X, 1 = Y) within a slab around height ``z``."""
+        co = [obj.matrix_world @ v.co for v in obj.data.vertices]
+        vals = [p[axis] for p in co if abs(p.z - z) < 1.0]
+        return max(vals) - min(vals) if vals else 0.0
 
-    def test_fossa_bulge_and_selection(self):
+    def test_fan_converges_from_the_whole_origin(self):
         props = bpy.context.scene.myogen
         props.muscle_shape = 'FAN'
-        props.fossa_radius_mm = 12.0
+        self.assertTrue(self.vb.is_fan(props))
+        self.assertEqual(bpy.ops.myogen.muscle_preview_update(), {'FINISHED'})
+        wire = self.coll.objects[M + self.vb.TUBE_SUFFIX]
+        self.assertTrue(len(wire.data.edges) > 0 and len(wire.data.polygons) == 0)   # fibre courses
+        self.assertEqual(bpy.ops.myogen.muscle_preview_stop(), {'FINISHED'})
+        belly = self.generate()
+        tree = self.assert_solid(belly)
+        islands = self.vb._islands(_bm(belly))
+        self.assertEqual(len(islands), 1)
+        for corner in (Vector((8.0, 4.0, 38.0)), Vector((-8.0, -4.0, 38.0))):    # spreads over the origin
+            self.assertTrue(inside(tree, corner), corner)
+        self.assertTrue(inside(tree, Vector((0, 0, 20))))                         # joins the insertion
+        self.assertFalse(inside(tree, Vector((0, 0, 6))))                         # the process stays bone
+        self.assertFalse(inside(tree, Vector((13, 0, 36))))                       # the crest stays bone
+        wide, narrow = self.fan_extent(belly, 34.0, 0), self.fan_extent(belly, 10.0, 0)
+        self.assertGreater(wide, narrow * 1.3)                                    # converges
 
-        def volume():
-            mesh, _w = self.vb.solid_mesh(bpy.context, M)
-            bm = bmesh.new()
-            bm.from_mesh(mesh)
-            v = bm.calc_volume(signed=True)
-            bm.free()
-            bpy.data.meshes.remove(mesh)
-            return v
-        props.fascia_bulge_mm = 0.0
-        flat = volume()
-        props.fascia_bulge_mm = 3.0
-        bulged = volume()
-        props.fascia_bulge_mm = -3.0
-        sunk = volume()
-        self.assertGreater(bulged, flat * 1.05)
-        self.assertLess(sunk, flat * 0.95)
-        props.fascia_bulge_mm = 0.0
-        # a submitted fossa: the underside of the skull with both crests, wider than the reach
-        fossa = bmesh.new()
-        fossa.from_mesh(self.skull.data)
-        fossa.normal_update()
-        bmesh.ops.delete(fossa, geom=[f for f in fossa.faces if f.calc_center_median().z > 40.5], context='FACES')
-        link(M + self.vb.FOSSA_SUFFIX, fossa, self.coll)
-        props.fossa_radius_mm = 3.0
-        narrow = volume()
-        self.coll.objects[M + self.vb.FOSSA_SUFFIX].name = "unused_fossa"
-        self.assertLess(volume(), narrow)                     # the reach alone covers less
+    def test_fan_rings_set_width_and_thickness(self):
+        props = bpy.context.scene.myogen
+        props.muscle_shape = 'FAN'
+        props.ring_count = 3
+        props.use_controls = True
+        self.assertEqual(bpy.ops.myogen.muscle_preview_update(), {'FINISHED'})
+        preview_obj = self.coll.objects[M + self.vb.PREVIEW_SUFFIX]
+        ring_list = self.rings.ring_objects(self.coll, M)
+        self.assertEqual(len(ring_list), 3)
+        z_mid = ring_list[1].matrix_world.translation.z
+        width0 = self.fan_extent(preview_obj, z_mid, 0)
+        middle = ring_list[1]
+        middle.scale = (middle.scale.x * 1.6, middle.scale.y, 1.0)              # wider fan
+        bpy.context.view_layer.update()
+        self.assertTrue(self.vb.flush_live(bpy.context))
+        width1 = self.fan_extent(preview_obj, z_mid, 0)
+        self.assertGreater(width1, width0 * 1.2)
+        self.assertEqual(bpy.ops.myogen.muscle_preview_stop(), {'FINISHED'})
 
     @staticmethod
     def move_to(obj, location):

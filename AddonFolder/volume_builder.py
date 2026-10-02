@@ -1,14 +1,14 @@
-"""Solid muscle belly: (tube along the path [∪ fossa fill] ∪ attachment layers) − bones.
+"""Solid muscle belly: (tube or fibres along the path ∪ attachment layers) − bones.
 
-The belly is a tube along the user's path ``<M>_curve`` (:mod:`tube`),
-sized and turned by the section rings on the path (:mod:`rings`) or by the
-muscle type's default profile; Fan and Sheet muscles add the space they
-fill around the origin (the fascia envelope of the fossa). Built on a voxel
+The belly follows the user's path ``<M>_curve``: a tube (:mod:`tube`) sized
+and turned by the section rings on the path (:mod:`rings`) or by the muscle
+type's profile, or, for fan-shaped muscles, the union of fibres from the
+whole origin attachment to the insertion (:mod:`fan`). Built on a voxel
 grid, so it is always closed, lies on the outer face of the bones and never
 crosses itself:
 
-1. occupancy of the tube (and of the fossa envelope) by +Z scanlines
-   (winding number: overlapping parts are a union), Gaussian-smoothed;
+1. occupancy of the tube by +Z scanlines (winding number: overlapping parts
+   are a union) or of the fibres (capsules), Gaussian-smoothed;
 2. a layer over each attachment, up to the minimum thickness outwards from
    its bone (:func:`attachment_layer`), so the whole attachment is covered;
 3. minus the origin and insertion bones (ray parity);
@@ -33,6 +33,7 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 from . import myo_record
+from . import fan
 from . import preview
 from . import rings
 from . import tube
@@ -43,20 +44,16 @@ AUTO_VOXELS_ACROSS = 110
 MAX_VOXELS_ACROSS = 400
 #: The automatic voxel is at most the smallest section radius / this.
 VOXELS_PER_RADIUS = 6.0
+#: For fan muscles (overlapping fibres) the fibre radius / this is enough.
+VOXELS_PER_FIBRE_RADIUS = 3.0
+#: Upper bound of grid cells (keeps the time bounded on large muscles).
+MAX_CELLS = 8_000_000
 #: Automatic attachment thickness along the path, in voxels.
 AUTO_THICKNESS_VOXELS = 3.0
-#: Automatic voxel size for the fossa fill = largest dimension / this.
-AUTO_FOSSA_VOXELS_ACROSS = 150
-#: Fascia bulge falls off with the depth of the fossa under the envelope: a
-#: point of the envelope this deep (in units of the bulge) bulges ~63 %.
-BULGE_DEPTH_FACTOR = 1.5
-#: Fossa reach: bone points whose outward normal makes a cosine below this
 #: with the origin's outward normal are on another side (far side of a crest).
 SIDE_MIN_COS = 0.0
 #: Smoothing passes on the free surface (removes voxel terracing).
 SMOOTH_PASSES = 3
-#: Edge length of the subdivided fascia envelope, in voxels (the bulge is smooth).
-ENVELOPE_EDGE_VOXELS = 5.0
 #: A voxel is in the layer over an attachment if it lies within this cosine
 #: of the outward normal at its nearest attachment point (60°).
 LAYER_CONE_COS = 0.5
@@ -207,105 +204,6 @@ def _world_coords(obj):
     obj.data.vertices.foreach_get("co", co)
     m = np.array(obj.matrix_world)
     return co.reshape(-1, 3) @ m[:3, :3].T + m[:3, 3]
-
-
-def fossa_points(bone_obj, origin_surface, radius, fossa_obj=None):
-    """Bone points around the origin that bound the space the muscle fills.
-
-    :arg bone_obj: Origin bone.
-    :type bone_obj: :class:`bpy.types.Object`
-    :arg origin_surface: Origin attachment surface.
-    :type origin_surface: :class:`bpy.types.Object`
-    :arg radius: Bone vertices closer than this to the origin surface, and
-       facing the same side (normal within ``acos(SIDE_MIN_COS)`` of the
-       origin's outward normal), are taken (Blender units). Ignored when
-       ``fossa_obj`` is given.
-    :type radius: float
-    :arg fossa_obj: Optional surface selected by the user on the bone
-       (``<M>_fossa``): the region the muscle covers (crests, arch included).
-    :type fossa_obj: :class:`bpy.types.Object`
-    :return: World-space points, (N, 3).
-    :rtype: :class:`numpy.ndarray`
-    """
-    origin = _world_coords(origin_surface)
-    if fossa_obj is not None:
-        return np.concatenate([_world_coords(fossa_obj), origin])
-    bone = _world_coords(bone_obj)
-    lo, hi = origin.min(0) - radius, origin.max(0) + radius
-    box = np.all((bone > lo) & (bone < hi), axis=1)
-    cand = bone[box]
-    # Same side as the origin only: bone whose outward normal faces away from
-    # the origin's (the far side of a sagittal crest, the inside of the
-    # braincase) does not bound this muscle.
-    normals = np.empty(len(bone_obj.data.vertices) * 3)
-    bone_obj.data.vertex_normals.foreach_get("vector", normals)
-    normals = normals.reshape(-1, 3)[box] @ np.array(bone_obj.matrix_world.to_3x3().inverted_safe().transposed()).T
-    _point, facing, _size = preview.attachment_anchor(origin_surface, bone_obj)
-    facing = np.array(facing)
-    centre = origin.mean(0)
-    nearest = np.argmin(((cand - centre) ** 2).sum(1)) if len(cand) else 0
-    if len(cand) and normals[nearest] @ facing < 0.0:          # bone normals point inwards
-        normals = -normals
-    same_side = normals @ facing >= SIDE_MIN_COS * np.linalg.norm(normals, axis=1)
-    tree = BVHTree.FromPolygons([Vector(p) for p in origin.tolist()],
-                                [list(p.vertices) for p in origin_surface.data.polygons])
-    near = np.fromiter((tree.find_nearest(Vector(p))[3] <= radius for p in cand.tolist()), bool, len(cand))
-    return np.concatenate([cand[near & same_side], origin])
-
-
-def fascia_envelope(points, bones, bulge, edge, max_points=20000):
-    """Convex envelope of the fossa, bulged outwards like a fascia.
-
-    The convex hull of ``points`` spans the fossa between the bony
-    prominences (crests, zygomatic arch, coronoid process). It is subdivided
-    (edges ≤ ``edge``) and every vertex is pushed out along its normal by
-    ``bulge · (1 − exp(−d / (BULGE_DEPTH_FACTOR · bulge)))``, ``d`` being its
-    distance to the bone: the envelope stays on the prominences and bulges
-    where it spans a deep fossa. The displacement (not the hull) is smoothed.
-
-    :arg points: World-space points (:func:`fossa_points`).
-    :type points: :class:`numpy.ndarray`
-    :arg bones: Bone objects.
-    :type bones: list of :class:`bpy.types.Object`
-    :arg bulge: Maximum outward bulge (Blender units); 0 = plain hull;
-       negative values sink the surface into the fossa (slimmer muscle).
-    :type bulge: float
-    :arg edge: Target edge length of the subdivided envelope.
-    :type edge: float
-    :arg max_points: Points used for the hull (subsampled above this).
-    :type max_points: int
-    :return: New closed world-space bmesh with outward normals (caller frees it).
-    :rtype: :class:`bmesh.types.BMesh`
-    """
-    bm = bmesh.new()
-    for p in points[::max(1, len(points) // max_points)].tolist():
-        bm.verts.new(p)
-    bmesh.ops.convex_hull(bm, input=bm.verts, use_existing_faces=False)
-    used = {v for f in bm.faces for v in f.verts}
-    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v not in used], context='VERTS')
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    if bulge == 0.0:
-        return bm
-    for _ in range(12):
-        long_edges = [e for e in bm.edges if e.calc_length() > edge]
-        if not long_edges:
-            break
-        bmesh.ops.subdivide_edges(bm, edges=long_edges, cuts=1, use_grid_fill=False)
-        bmesh.ops.triangulate(bm, faces=bm.faces[:])
-    bm.normal_update()
-    trees = [preview._bone_tree(b) for b in bones]
-    depth = BULGE_DEPTH_FACTOR * abs(bulge)
-    moves = {}
-    for v in bm.verts:
-        d = min(t.find_nearest(v.co)[3] for t in trees) if trees else depth
-        moves[v] = v.normal * bulge * (1.0 - math.exp(-d / depth))
-    for _ in range(4):                    # smooth the displacement, not the hull
-        moves = {v: (moves[v] + sum((moves[e.other_vert(v)] for e in v.link_edges), Vector()))
-                 / (1 + len(v.link_edges)) for v in bm.verts}
-    for v, m in moves.items():
-        v.co += m
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    return bm
 
 
 def smoothing_passes(sigma, voxel):
@@ -475,34 +373,34 @@ def _islands(bm):
     return islands
 
 
-#: Muscle types built by filling the fossa (no path editing).
-FOSSA_SHAPES = {'FAN', 'SHEET'}
+#: Muscle types built from fibres spread over the origin (:mod:`fan`).
+FAN_SHAPES = {'FAN'}
 
 
-def uses_fossa(props):
-    """True if the current muscle type is built by Fill fossa.
+def is_fan(props):
+    """True if the current muscle type is built from fibres (fan-shaped muscles).
 
     :arg props: Scene settings.
     :type props: :class:`properties.MyoGeneratorProperties`
     :rtype: bool
     """
-    return props.muscle_shape in FOSSA_SHAPES
+    return props.muscle_shape in FAN_SHAPES
 
 
-def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, report=None, fossa_obj=None,
+def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, report=None, fibres=None,
                 voxel_scale=1.0, min_radius=None):
-    """Solid belly from the tube along the path (and the fossa), the attachments and the bones.
+    """Solid belly from the tube or the fibres, the attachments and the bones.
 
-    Body = the tube along the muscle path (:func:`tube.path_tube`), plus, for
-    Fan and Sheet (:func:`uses_fossa`), the fascia envelope of the fossa
-    around the origin (:func:`fascia_envelope` of :func:`fossa_points`). The
-    body is smoothed by ``surface_smoothing_mm`` **before** the bones are cut
-    (so the face on the bone stays exact), joined to a layer over each
-    attachment (:func:`attachment_layer`), and the bones are subtracted.
+    Body = the tube along the muscle path (:func:`tube.path_tube`) or, for fan
+    muscles, the fibres from the origin to the insertion (:func:`fan.fibres`,
+    rasterised by :func:`fan.occupancy`). The body is smoothed by
+    ``surface_smoothing_mm`` **before** the bones are cut (so the face on the
+    bone stays exact), joined to a layer over each attachment
+    (:func:`attachment_layer`), and the bones are subtracted.
 
     :arg context: Context (scene settings ``scene.myogen``; unit scale).
     :type context: :class:`bpy.types.Context`
-    :arg tube_bm: World-space tube along the path (:func:`tube.path_tube`); not freed.
+    :arg tube_bm: World-space tube along the path, or None when ``fibres`` is given; not freed.
     :type tube_bm: :class:`bmesh.types.BMesh`
     :arg origin_surface: Origin attachment surface.
     :type origin_surface: :class:`bpy.types.Object`
@@ -514,19 +412,18 @@ def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, repo
        ``seconds``, ``anchored``, ``islands_removed``, ``pieces`` (kept
        disconnected parts) and ``stages`` (seconds per stage).
     :type report: dict
-    :arg fossa_obj: Optional user-selected fossa surface (Fan / Sheet).
-    :type fossa_obj: :class:`bpy.types.Object`
+    :arg fibres: ``(courses, radii)`` from :func:`fan.fibres`, or None.
+    :type fibres: tuple
     :arg voxel_scale: Multiplies the voxel size (> 1 = faster draft).
     :type voxel_scale: float
-    :arg min_radius: Smallest section radius of the tube (Blender units): the
-       automatic voxel is at most ``min_radius / VOXELS_PER_RADIUS``, so long,
-       thin muscles keep their detail.
+    :arg min_radius: Smallest section radius (Blender units): the automatic
+       voxel is at most ``min_radius / VOXELS_PER_RADIUS``, so thin muscles
+       keep their detail.
     :type min_radius: float
     :return: ``(bm, weights)``: world-space bmesh (caller frees it) and per
        vertex weights (0 = anchored on an attachment, 1 = free).
     :rtype: tuple
-    :raises ValueError: If an attachment or the origin bone (Fan / Sheet) is
-       missing, or the solid is empty.
+    :raises ValueError: If an attachment is missing or the solid is empty.
     """
     started = time.time()
     stages = [('start', started)]
@@ -534,34 +431,27 @@ def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, repo
     bu_per_mm = 1.0 / (1000.0 * myo_record.metres_per_unit(context.scene))
     surfaces = [(s, b) for s, b in zip((origin_surface, insertion_surface), bones) if s is not None]
     bone_objs = list({b for b in bones if b is not None and b.type == 'MESH'})
-    fossa = uses_fossa(props)
-
     if origin_surface is None or insertion_surface is None:
         raise ValueError("both attachments are needed")
-    tube_pts = np.array([v.co for v in tube_bm.verts])
-    pts = None
-    if fossa:
-        if bones[0] is None:
-            raise ValueError("Fan / Sheet need the origin bone")
-        pts = fossa_points(bones[0], origin_surface, props.fossa_radius_mm * bu_per_mm, fossa_obj)
-    extent = [tube_pts, _world_coords(origin_surface), _world_coords(insertion_surface)] + ([pts] if fossa else [])
-    allp = np.concatenate(extent)
-    lo, hi = Vector(allp.min(0)), Vector(allp.max(0))
+    if fibres is not None:
+        courses, radii = fibres
+        body_pts = courses.reshape(-1, 3)
+        body_pad = float(radii.max())
+    else:
+        body_pts = np.array([v.co for v in tube_bm.verts])
+        body_pad = 0.0
+    allp = np.concatenate([body_pts, _world_coords(origin_surface), _world_coords(insertion_surface)])
+    lo, hi = Vector(allp.min(0) - body_pad), Vector(allp.max(0) + body_pad)
     size = max(hi - lo)
-    auto = size / (AUTO_FOSSA_VOXELS_ACROSS if fossa else AUTO_VOXELS_ACROSS)
+    auto = size / AUTO_VOXELS_ACROSS
     if min_radius:
-        auto = min(auto, min_radius / VOXELS_PER_RADIUS)
-    envelope = None
+        auto = min(auto, min_radius / (VOXELS_PER_FIBRE_RADIUS if fibres is not None else VOXELS_PER_RADIUS))
     voxel = props.voxel_size_mm * bu_per_mm if props.voxel_size_mm > 0 else auto
-    voxel = max(voxel, size / MAX_VOXELS_ACROSS) * voxel_scale
+    extent = hi - lo
+    budget = (max(extent.x, 1e-9) * max(extent.y, 1e-9) * max(extent.z, 1e-9) / MAX_CELLS) ** (1.0 / 3.0)
+    voxel = max(voxel, size / MAX_VOXELS_ACROSS, budget) * voxel_scale
     thickness = (props.attachment_thickness_mm * bu_per_mm if props.attachment_thickness_mm > 0
                  else AUTO_THICKNESS_VOXELS * voxel)
-    bulge = props.fascia_bulge_mm * bu_per_mm if fossa else 0.0
-    if fossa:
-        envelope = fascia_envelope(pts, bone_objs, bulge, edge=ENVELOPE_EDGE_VOXELS * voxel)
-        for v in envelope.verts:
-            lo = Vector(map(min, lo, v.co))
-            hi = Vector(map(max, hi, v.co))
     sigma = props.surface_smoothing_mm * bu_per_mm
     pad = thickness + 3 * voxel + 2 * sigma
     lo -= Vector((pad, pad, pad))
@@ -576,10 +466,10 @@ def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, repo
     link = np.zeros(shape, dtype=bool)                      # layers over the attachments
     for s_obj, b_obj in surfaces:
         link |= attachment_layer(s_obj, b_obj, thickness, xs, ys, zs)
-    body = occupancy(_bm_tree(tube_bm), xs, ys, zs, z_start, signed=True)
-    if fossa:
-        body |= occupancy(_bm_tree(envelope), xs, ys, zs, z_start, signed=True)
-        envelope.free()
+    if fibres is not None:
+        body = fan.occupancy(courses, radii, xs, ys, zs)
+    else:
+        body = occupancy(_bm_tree(tube_bm), xs, ys, zs, z_start, signed=True)
 
     stages.append(('occupancy', time.time()))
     columns = (body | link).any(axis=2)
@@ -657,8 +547,6 @@ def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, repo
     return bm, weights
 
 
-#: Suffix of the optional fossa surface (``<M>_fossa``).
-FOSSA_SUFFIX = "_fossa"
 #: Suffix of the preview object (``<M>_preview``): the solid belly at draft resolution.
 PREVIEW_SUFFIX = "_preview"
 #: Suffix of the wire tube (``<M>_tube``) that follows the path and the rings at once.
@@ -667,6 +555,8 @@ TUBE_SUFFIX = "_tube"
 DRAFT_VOXEL_SCALE = 1.8
 #: Seconds without changes before the live solid preview rebuilds.
 LIVE_DELAY = 0.6
+#: Fibres drawn in the wire of a fan muscle.
+WIRE_FIBRES = 40
 #: Seconds before the wire tube follows a change.
 TUBE_DELAY = 0.02
 
@@ -697,8 +587,9 @@ def ensure_path(context, muscle_name, coll, objs):
 def muscle_sections(context, muscle_name, coll, objs, path, points):
     """Sections of the belly along the path: from the rings, or the type's default profile.
 
-    With *Shape with rings* on, the rings are created when missing
-    (:func:`rings.default_rings`).
+    With *Shape with rings* on, the rings are created when missing: for a
+    belly from the type's profile (:func:`tube.default_profile`), for a fan
+    from its natural width, thickness and orientation (:func:`fan.fibres`).
 
     :arg context: Context.
     :type context: :class:`bpy.types.Context`
@@ -712,17 +603,47 @@ def muscle_sections(context, muscle_name, coll, objs, path, points):
     :type path: :class:`bpy.types.Object`
     :arg points: Arc-length samples of the path.
     :type points: list of :class:`mathutils.Vector`
-    :return: ``(sections, rings)``; ``rings`` is empty when rings are off.
+    :return: ``(sections, rings)``; ``sections`` is None for a fan without
+       rings (natural fan); ``rings`` is empty when rings are off.
     :rtype: tuple
     """
     props = context.scene.myogen
+    fan_type = is_fan(props)
     if not props.use_controls:
-        return tube.default_profile(objs["origin"], objs["insertion"], props.muscle_shape), []
+        return (None if fan_type else tube.default_profile(objs["origin"], objs["insertion"],
+                                                           props.muscle_shape)), []
     ring_list = rings.ring_objects(coll, muscle_name)
     if len(ring_list) < 2:
-        ring_list = rings.default_rings(coll, muscle_name, path, objs["origin"], objs["insertion"],
-                                        props.muscle_shape, props.ring_count)
+        if fan_type:
+            ring_list = rings.create_rings(coll, muscle_name, path, natural_fan_sections(context, objs, points))
+        else:
+            ring_list = rings.default_rings(coll, muscle_name, path, objs["origin"], objs["insertion"],
+                                            props.muscle_shape, props.ring_count)
     return rings.ring_sections(ring_list, points), ring_list
+
+
+def natural_fan_sections(context, objs, points):
+    """Ring sections ``(u, half_width, half_thickness, angle)`` of the natural fan.
+
+    :arg context: Context (``scene.myogen``: bones, ring count).
+    :type context: :class:`bpy.types.Context`
+    :arg objs: Muscle objects (attachments).
+    :type objs: dict
+    :arg points: Arc-length samples of the path.
+    :type points: list of :class:`mathutils.Vector`
+    :rtype: list of tuple
+    """
+    props = context.scene.myogen
+    _c, _r, natural = fan.fibres(points, objs["origin"], objs["insertion"],
+                                 (props.origin_object, props.insertion_object), fan.DRAFT_FIBRES)
+    h = fan.default_thickness(points)
+    count = max(2, props.ring_count)
+    secs = []
+    for k in range(count):
+        u = k / (count - 1)
+        j = min(range(len(natural)), key=lambda i: abs(natural[i][0] - u))
+        secs.append((u, max(natural[j][1], h(u)), h(u), natural[j][2]))
+    return secs
 
 
 def _inputs(context, muscle_name):
@@ -738,12 +659,24 @@ def _inputs(context, muscle_name):
     return coll, objs, path, points, sections, ring_list
 
 
+def _body(context, objs, points, sections, draft):
+    """``(tube_bm, fibres, min_radius)`` of the current muscle type."""
+    props = context.scene.myogen
+    if is_fan(props):
+        courses, radii, _natural = fan.fibres(points, objs["origin"], objs["insertion"],
+                                              (props.origin_object, props.insertion_object),
+                                              fan.DRAFT_FIBRES if draft else fan.FIBRES, sections=sections)
+        return None, (courses, radii), float(radii.min())
+    return tube.path_tube(points, sections), None, min(min(sec[1], sec[2]) for sec in sections)
+
+
 def solid_mesh(context, muscle_name, report=None, voxel_scale=1.0):
     """Build the solid belly of a muscle into a new mesh datablock (world space).
 
     Body = the tube along the path (:func:`tube.path_tube`, sections from the
-    rings or the type's profile), plus the fossa fill for Fan and Sheet. The
-    rings are put back perpendicular to the path afterwards.
+    rings or the type's profile) or, for fan muscles, the fibres from the
+    origin to the insertion (:func:`fan.fibres`). The rings are put back
+    perpendicular to the path afterwards.
 
     :arg context: Context.
     :type context: :class:`bpy.types.Context`
@@ -751,7 +684,7 @@ def solid_mesh(context, muscle_name, report=None, voxel_scale=1.0):
     :type muscle_name: str
     :arg report: Optional dict, see :func:`build_belly`.
     :type report: dict
-    :arg voxel_scale: See :func:`build_belly`.
+    :arg voxel_scale: See :func:`build_belly`; > 1 also uses fewer fibres.
     :type voxel_scale: float
     :return: ``(mesh, weights)``.
     :rtype: tuple
@@ -760,14 +693,14 @@ def solid_mesh(context, muscle_name, report=None, voxel_scale=1.0):
     props = context.scene.myogen
     report = {} if report is None else report
     coll, objs, path, points, sections, ring_list = _inputs(context, muscle_name)
-    tube_bm = tube.path_tube(points, sections)
+    tube_bm, fibres, min_radius = _body(context, objs, points, sections, voxel_scale > 1.0)
     try:
         bm, weights = build_belly(context, tube_bm, objs["origin"], objs["insertion"],
                                   (props.origin_object, props.insertion_object), report,
-                                  fossa_obj=coll.objects.get(muscle_name + FOSSA_SUFFIX), voxel_scale=voxel_scale,
-                                  min_radius=min(min(sec[1], sec[2]) for sec in sections))
+                                  fibres=fibres, voxel_scale=voxel_scale, min_radius=min_radius)
     finally:
-        tube_bm.free()
+        if tube_bm is not None:
+            tube_bm.free()
     if ring_list:
         rings.align_rings(ring_list, points, sections)
     _remember_state(context)
@@ -778,7 +711,9 @@ def solid_mesh(context, muscle_name, report=None, voxel_scale=1.0):
 
 
 def update_tube(context, muscle_name):
-    """Rewrite the wire tube ``<M>_tube`` from the current path and rings (instant feedback).
+    """Rewrite the wire ``<M>_tube`` from the current path and rings (instant feedback).
+
+    A belly shows its tube; a fan shows a subset of its fibres (their courses).
 
     :arg context: Context.
     :type context: :class:`bpy.types.Context`
@@ -788,11 +723,21 @@ def update_tube(context, muscle_name):
     :rtype: :class:`bpy.types.Object`
     :raises ValueError: See :func:`solid_mesh`.
     """
-    coll, _objs, _path, points, sections, _rings = _inputs(context, muscle_name)
-    bm = tube.path_tube(points, sections)
+    coll, objs, _path, points, sections, _rings = _inputs(context, muscle_name)
     mesh = bpy.data.meshes.new(muscle_name + TUBE_SUFFIX)
-    bm.to_mesh(mesh)
-    bm.free()
+    if is_fan(context.scene.myogen):
+        courses, _radii, _natural = fan.fibres(points, objs["origin"], objs["insertion"],
+                                               (context.scene.myogen.origin_object,
+                                                context.scene.myogen.insertion_object),
+                                               WIRE_FIBRES, sections=sections)
+        verts = courses.reshape(-1, 3).tolist()
+        n = courses.shape[1]
+        edges = [(f * n + k, f * n + k + 1) for f in range(courses.shape[0]) for k in range(n - 1)]
+        mesh.from_pydata(verts, edges, [])
+    else:
+        bm = tube.path_tube(points, sections)
+        bm.to_mesh(mesh)
+        bm.free()
     obj = coll.objects.get(muscle_name + TUBE_SUFFIX)
     if obj is None:
         obj = bpy.data.objects.new(muscle_name + TUBE_SUFFIX, mesh)
@@ -952,7 +897,7 @@ _last_state = None
 
 
 def _state(context):
-    """Signature of what the belly depends on: path, rings, attachments, fossa."""
+    """Signature of what the belly depends on: path, rings, attachments."""
     props = context.scene.myogen
     coll, objs = preview.muscle_objects(context)
     if coll is None:
@@ -972,8 +917,6 @@ def _state(context):
         obj = objs.get(key)
         if obj is not None:
             parts.append((len(obj.data.vertices),) + tuple(round(x, 5) for row in obj.matrix_world for x in row))
-    fossa = coll.objects.get(name + FOSSA_SUFFIX)
-    parts.append(len(fossa.data.vertices) if fossa is not None else 0)
     return hash(tuple(parts))
 
 
@@ -1076,7 +1019,7 @@ def on_setting_changed(self, context):
 
 
 def on_shape_changed(self, context):
-    """Muscle type changed: rebuild the live preview (Fan / Sheet add the fossa fill).
+    """Muscle type changed: rebuild the live preview (Fan builds the belly from fibres).
 
     The path and the rings are kept; *Reset Rings* sizes the rings with the
     new type's profile.
@@ -1109,13 +1052,13 @@ def flush_live(context):
 
 @persistent
 def _on_depsgraph_update(scene, depsgraph):
-    """Schedule a refresh when the path, a ring, an attachment or the fossa of
+    """Schedule a refresh when the path, a ring or an attachment of
     the live muscle changes (our own updates leave the state unchanged)."""
     props = getattr(scene, "myogen", None)
     if props is None or not props.preview_live:
         return
     name = props.muscle_name
-    watched = {name + s for s in ("_curve", "_origin", "_insertion", FOSSA_SUFFIX)}
+    watched = {name + s for s in ("_curve", "_origin", "_insertion")}
     for update in depsgraph.updates:
         if not isinstance(update.id, bpy.types.Object):
             continue

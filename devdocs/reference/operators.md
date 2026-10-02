@@ -76,36 +76,6 @@ class `Submit_Insertion_Op` · `core_operators.py` · poll: `return context.obje
 
 _No parameters._
 
-### `bpy.ops.myogen.select_fossa()`
-
-**Select Fossa** — Optional, for Fill fossa: enter Edit Mode on the origin bone to select the whole region the muscle covers, up to the crests and the zygomatic arch; then Submit Fossa
-
-Select the fossa the muscle fills on the origin bone (optional)
-
-class `Select_Fossa_Op` · `core_operators.py`
-
-_No parameters._
-
-### `bpy.ops.myogen.submit_fossa()`
-
-**Submit Fossa** — Store the selected faces as <muscle>_fossa: Fill fossa then uses it instead of the reach
-
-Store the selected faces as the fossa the muscle fills
-
-class `Submit_Fossa_Op` · `core_operators.py` · poll: `return context.object is not None and context.object.mode == 'EDIT'`
-
-_No parameters._
-
-### `bpy.ops.myogen.remove_fossa()`
-
-**Remove Fossa** — Delete <muscle>_fossa; Fill fossa then uses the reach around the origin
-
-Forget the submitted fossa and use the reach again
-
-class `Remove_Fossa_Op` · `core_operators.py`
-
-_No parameters._
-
 ### `bpy.ops.myogen.next_muscle()`
 
 **Next Muscle** — Start the creation of the next muscle

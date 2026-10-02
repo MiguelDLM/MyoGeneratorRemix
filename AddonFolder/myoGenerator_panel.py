@@ -143,22 +143,8 @@ def _draw_path_and_rings(col, context, props):
     row.operator("myogen.reset_rings", text="", icon='FILE_REFRESH')
     col.prop(props, "ring_count")
     _hint(col, "G slides a ring along the path, S sizes it, R turns it")
-
-
-def _draw_fossa_settings(col, context, props):
-    from . import volume_builder
-    has_fossa = context.scene.objects.get(props.muscle_name + volume_builder.FOSSA_SUFFIX) is not None
-    col.label(text="Fossa it fills")
-    row = col.row(align=True)
-    sub = row.row(align=True)
-    sub.enabled = not has_fossa
-    sub.prop(props, "fossa_radius_mm")
-    row.operator("myogen.select_fossa", text="", icon='RESTRICT_SELECT_OFF')
-    row.operator("myogen.submit_fossa", text="", icon='CHECKMARK')
-    if has_fossa:
-        row.operator("myogen.remove_fossa", text="", icon='X')
-    _hint(col, "Using the submitted fossa" if has_fossa else "Better: select the fossa on the bone and submit it")
-    col.prop(props, "fascia_bulge_mm")
+    if props.muscle_shape == 'FAN':
+        _hint(col, "Fan: ring X = width of the fan, Y = thickness")
 
 
 def draw_muscle_creation(layout, context):
@@ -172,7 +158,6 @@ def draw_muscle_creation(layout, context):
     :arg context: Draw context.
     :type context: :class:`bpy.types.Context`
     """
-    from . import volume_builder
     props = context.scene.myogen
     box = layout.box()
     box.label(text="Muscle Creation", icon='CURVE_BEZCURVE')
@@ -190,8 +175,6 @@ def draw_muscle_creation(layout, context):
     col = box.column()
     col.prop(props, "muscle_shape", text="Type")
     _draw_path_and_rings(col, context, props)
-    if volume_builder.uses_fossa(props):
-        _draw_fossa_settings(col, context, props)
     more = _section(col, "myogen_more", "More settings")
     if more is not None:
         more.prop(props, "attachment_thickness_mm")

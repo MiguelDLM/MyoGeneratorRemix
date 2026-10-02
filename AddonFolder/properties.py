@@ -124,16 +124,16 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
                     "keeps the attachment's outline before following the path and the belly settings")
     muscle_shape: bpy.props.EnumProperty(
         name="Muscle type",
-        items=[('FUSIFORM', "Fusiform", "A belly swelling between the attachments (e.g. digastric, "
-                                         "brachioradialis): thick in the middle"),
-               ('PARALLEL', "Parallel / strap", "Even width, somewhat flattened (e.g. pterygoids)"),
-               ('FAN', "Fan (fills a fossa)", "Fills the fossa around the origin up to the bony crests and runs "
-                                              "on to the insertion (e.g. temporalis)"),
-               ('SHEET', "Sheet (fills a fossa, thin)", "Like Fan, with a thinner fill (negative Surface bulge) "
-                                                        "(e.g. superficial masseter)")],
+        items=[('FUSIFORM', "Fusiform", "A belly along the path, thick in the middle (e.g. digastric, "
+                                         "brachioradialis)"),
+               ('PARALLEL', "Parallel / strap", "A belly along the path of even width, somewhat flattened "
+                                                  "(e.g. pterygoids)"),
+               ('FAN', "Fan (convergent)", "Fibres from the whole origin converging on the insertion along "
+                                           "the path (e.g. temporalis, pectoralis major)")],
         default='FUSIFORM', update=on_shape_changed,
-        description="Default profile of the belly along the path (used until you shape it with rings): Fan "
-                    "and Sheet also fill the fossa around the origin. Switching type keeps the path and the rings")
+        description="How the belly is built along the path. Fusiform and Parallel: a belly whose section "
+                    "the rings set. Fan: fibres spread over the origin; the rings set the fan's width (X) and "
+                    "thickness (Y). Switching type keeps the path and the rings")
     belly_bulge: bpy.props.FloatProperty(
         name="Belly", default=0.35, min=-0.7, max=1.5, soft_min=-0.6, soft_max=1.0,
         update=on_setting_changed,
@@ -148,18 +148,6 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
         update=on_setting_changed,
         description="Along the path: thickness / width of the cross-section (1 = round, 0.2 = flat). The "
                     "flat side turns with the curve's Tilt (Ctrl+T in Edit Mode)")
-    fossa_radius_mm: bpy.props.FloatProperty(
-        name="Reach (mm)", default=20.0, min=1.0, soft_max=60.0, precision=1,
-        update=on_setting_changed,
-        description="Fan / Sheet: how far around the origin the bone counts as the wall of the fossa the "
-                    "muscle fills. Larger = the muscle spreads further over the bone. Not used once a fossa "
-                    "has been submitted")
-    fascia_bulge_mm: bpy.props.FloatProperty(
-        name="Surface bulge (mm)", default=0.0, min=-20.0, soft_min=-10.0, soft_max=15.0, precision=1,
-        update=on_setting_changed,
-        description="Fan / Sheet: the outer surface starts stretched flat from crest to crest; positive "
-                    "values bulge it outwards (thicker muscle), negative values sink it into the fossa "
-                    "(thinner). The effect is largest over the deepest part of the fossa")
     use_controls: bpy.props.BoolProperty(
         name="Shape with rings", default=False, update=on_controls_toggled,
         description="Put rings on the path to set the size and turn of the belly where you want: they slide "
@@ -177,14 +165,14 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
     surface_smoothing_mm: bpy.props.FloatProperty(
         name="Smoothing (mm)", default=1.5, min=0.0, soft_max=6.0, precision=1,
         update=on_setting_changed,
-        description="Rounds off the outer surface over this distance, joining the rings, the fossa fill "
-                    "and the attachments smoothly (the face on the bone is never smoothed)")
+        description="Rounds off the outer surface over this distance, joining the belly and the attachments "
+                    "smoothly (the face on the bone is never smoothed)")
     voxel_size_mm: bpy.props.FloatProperty(
         name="Detail (mm)", default=0.0, min=0.0, soft_max=5.0, precision=2,
         update=on_setting_changed,
         description="Size of the voxels the belly is built from: smaller = finer and slower. The preview "
-                    "uses 1.8 x this. 0 = automatic (about 1/110 of the muscle, 1/150 for Fan / Sheet, and at "
-                    "most 1/6 of the thinnest section)")
+                    "uses 1.8 x this. 0 = automatic (about 1/110 of the muscle and at most 1/6 of the thinnest "
+                    "section)")
     bone_clearance_mm: bpy.props.FloatProperty(
         name="Bone gap (mm)", default=0.1, min=0.0, soft_max=2.0, precision=2,
         update=on_setting_changed,

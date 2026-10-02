@@ -2,17 +2,17 @@
 
 Source: `volume_builder.py`
 
-Solid muscle belly: (tube along the path [∪ fossa fill] ∪ attachment layers) − bones.
+Solid muscle belly: (tube or fibres along the path ∪ attachment layers) − bones.
 
-The belly is a tube along the user's path `<M>_curve` (`tube`),
-sized and turned by the section rings on the path (`rings`) or by the
-muscle type's default profile; Fan and Sheet muscles add the space they
-fill around the origin (the fascia envelope of the fossa). Built on a voxel
+The belly follows the user's path `<M>_curve`: a tube (`tube`) sized
+and turned by the section rings on the path (`rings`) or by the muscle
+type's profile, or, for fan-shaped muscles, the union of fibres from the
+whole origin attachment to the insertion (`fan`). Built on a voxel
 grid, so it is always closed, lies on the outer face of the bones and never
 crosses itself:
 
-1. occupancy of the tube (and of the fossa envelope) by +Z scanlines
-   (winding number: overlapping parts are a union), Gaussian-smoothed;
+1. occupancy of the tube by +Z scanlines (winding number: overlapping parts
+   are a union) or of the fibres (capsules), Gaussian-smoothed;
 2. a layer over each attachment, up to the minimum thickness outwards from
    its bone (`attachment_layer`), so the whole attachment is covered;
 3. minus the origin and insertion bones (ray parity);
@@ -32,12 +32,11 @@ solid follows after `LIVE_DELAY` s.
 | `AUTO_VOXELS_ACROSS` | `110` |
 | `MAX_VOXELS_ACROSS` | `400` |
 | `VOXELS_PER_RADIUS` | `6.0` |
+| `VOXELS_PER_FIBRE_RADIUS` | `3.0` |
+| `MAX_CELLS` | `8000000` |
 | `AUTO_THICKNESS_VOXELS` | `3.0` |
-| `AUTO_FOSSA_VOXELS_ACROSS` | `150` |
-| `BULGE_DEPTH_FACTOR` | `1.5` |
 | `SIDE_MIN_COS` | `0.0` |
 | `SMOOTH_PASSES` | `3` |
-| `ENVELOPE_EDGE_VOXELS` | `5.0` |
 | `LAYER_CONE_COS` | `0.5` |
 | `REMESH_FACTOR` | `0.75` |
 | `MAX_PUSH_VOXELS` | `3.0` |
@@ -45,12 +44,12 @@ solid follows after `LIVE_DELAY` s.
 | `_UP` | `Vector((0.0, 0.0, 1.0))` |
 | `_CORNERS` | `[(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 0, 1), (1, 0, 1), (0, 1, 1), (1, 1, 1)]` |
 | `_EDGES` | `[(a, b) for a in range(8) for b in range(a + 1, 8) if sum((x != y for x, y in zip(_CORN...` |
-| `FOSSA_SHAPES` | `{'FAN', 'SHEET'}` |
-| `FOSSA_SUFFIX` | `'_fossa'` |
+| `FAN_SHAPES` | `{'FAN'}` |
 | `PREVIEW_SUFFIX` | `'_preview'` |
 | `TUBE_SUFFIX` | `'_tube'` |
 | `DRAFT_VOXEL_SCALE` | `1.8` |
 | `LIVE_DELAY` | `0.6` |
+| `WIRE_FIBRES` | `40` |
 | `TUBE_DELAY` | `0.02` |
 
 ## Functions
@@ -92,40 +91,6 @@ attachment's border instead of spreading sideways.
 | `zs` | `numpy.ndarray` | Voxel-centre Z coordinates. |
 
 **Returns** (`numpy.ndarray`): Boolean array (len(xs), len(ys), len(zs)).
-
-### `fossa_points(bone_obj, origin_surface, radius, fossa_obj=None)`
-
-Bone points around the origin that bound the space the muscle fills.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `bone_obj` | `bpy.types.Object` | Origin bone. |
-| `origin_surface` | `bpy.types.Object` | Origin attachment surface. |
-| `radius` | float | Bone vertices closer than this to the origin surface, and facing the same side (normal within `acos(SIDE_MIN_COS)` of the origin's outward normal), are taken (Blender units). Ignored when `fossa_obj` is given. |
-| `fossa_obj` | `bpy.types.Object` | Optional surface selected by the user on the bone (`<M>_fossa`): the region the muscle covers (crests, arch included). |
-
-**Returns** (`numpy.ndarray`): World-space points, (N, 3).
-
-### `fascia_envelope(points, bones, bulge, edge, max_points=20000)`
-
-Convex envelope of the fossa, bulged outwards like a fascia.
-
-The convex hull of `points` spans the fossa between the bony
-prominences (crests, zygomatic arch, coronoid process). It is subdivided
-(edges ≤ `edge`) and every vertex is pushed out along its normal by
-`bulge · (1 − exp(−d / (BULGE_DEPTH_FACTOR · bulge)))`, `d` being its
-distance to the bone: the envelope stays on the prominences and bulges
-where it spans a deep fossa. The displacement (not the hull) is smoothed.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `points` | `numpy.ndarray` | World-space points (`fossa_points`). |
-| `bones` | list of `bpy.types.Object` | Bone objects. |
-| `bulge` | float | Maximum outward bulge (Blender units); 0 = plain hull; negative values sink the surface into the fossa (slimmer muscle). |
-| `edge` | float | Target edge length of the subdivided envelope. |
-| `max_points` | int | Points used for the hull (subsampled above this). |
-
-**Returns** (`bmesh.types.BMesh`): New closed world-space bmesh with outward normals (caller frees it).
 
 ### `smoothing_passes(sigma, voxel)`
 
@@ -182,9 +147,9 @@ surface from its level set, which is always manifold.
 
 **Returns** (`bmesh.types.BMesh`): New bmesh (caller frees it).
 
-### `uses_fossa(props)`
+### `is_fan(props)`
 
-True if the current muscle type is built by Fill fossa.
+True if the current muscle type is built from fibres (fan-shaped muscles).
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -192,32 +157,32 @@ True if the current muscle type is built by Fill fossa.
 
 **Returns** (bool): 
 
-### `build_belly(context, tube_bm, origin_surface, insertion_surface, bones, report=None, fossa_obj=None, voxel_scale=1.0, min_radius=None)`
+### `build_belly(context, tube_bm, origin_surface, insertion_surface, bones, report=None, fibres=None, voxel_scale=1.0, min_radius=None)`
 
-Solid belly from the tube along the path (and the fossa), the attachments and the bones.
+Solid belly from the tube or the fibres, the attachments and the bones.
 
-Body = the tube along the muscle path (`tube.path_tube`), plus, for
-Fan and Sheet (`uses_fossa`), the fascia envelope of the fossa
-around the origin (`fascia_envelope` of `fossa_points`). The
-body is smoothed by `surface_smoothing_mm` **before** the bones are cut
-(so the face on the bone stays exact), joined to a layer over each
-attachment (`attachment_layer`), and the bones are subtracted.
+Body = the tube along the muscle path (`tube.path_tube`) or, for fan
+muscles, the fibres from the origin to the insertion (`fan.fibres`,
+rasterised by `fan.occupancy`). The body is smoothed by
+`surface_smoothing_mm` **before** the bones are cut (so the face on the
+bone stays exact), joined to a layer over each attachment
+(`attachment_layer`), and the bones are subtracted.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `context` | `bpy.types.Context` | Context (scene settings `scene.myogen`; unit scale). |
-| `tube_bm` | `bmesh.types.BMesh` | World-space tube along the path (`tube.path_tube`); not freed. |
+| `tube_bm` | `bmesh.types.BMesh` | World-space tube along the path, or None when `fibres` is given; not freed. |
 | `origin_surface` | `bpy.types.Object` | Origin attachment surface. |
 | `insertion_surface` | `bpy.types.Object` | Insertion attachment surface. |
 | `bones` | sequence of `bpy.types.Object` | `(origin_bone, insertion_bone)`; None entries are skipped. |
 | `report` | dict | Optional dict filled with `voxel` (BU), `grid`, `seconds`, `anchored`, `islands_removed`, `pieces` (kept disconnected parts) and `stages` (seconds per stage). |
-| `fossa_obj` | `bpy.types.Object` | Optional user-selected fossa surface (Fan / Sheet). |
+| `fibres` | tuple | `(courses, radii)` from `fan.fibres`, or None. |
 | `voxel_scale` | float | Multiplies the voxel size (> 1 = faster draft). |
-| `min_radius` | float | Smallest section radius of the tube (Blender units): the automatic voxel is at most `min_radius / VOXELS_PER_RADIUS`, so long, thin muscles keep their detail. |
+| `min_radius` | float | Smallest section radius (Blender units): the automatic voxel is at most `min_radius / VOXELS_PER_RADIUS`, so thin muscles keep their detail. |
 
 **Returns** (tuple): `(bm, weights)`: world-space bmesh (caller frees it) and per vertex weights (0 = anchored on an attachment, 1 = free).
 
-**Raises** `ValueError`: If an attachment or the origin bone (Fan / Sheet) is missing, or the solid is empty.
+**Raises** `ValueError`: If an attachment is missing or the solid is empty.
 
 ### `ensure_path(context, muscle_name, coll, objs)`
 
@@ -239,8 +204,9 @@ operator).
 
 Sections of the belly along the path: from the rings, or the type's default profile.
 
-With *Shape with rings* on, the rings are created when missing
-(`rings.default_rings`).
+With *Shape with rings* on, the rings are created when missing: for a
+belly from the type's profile (`tube.default_profile`), for a fan
+from its natural width, thickness and orientation (`fan.fibres`).
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -251,22 +217,35 @@ With *Shape with rings* on, the rings are created when missing
 | `path` | `bpy.types.Object` | The muscle path. |
 | `points` | list of `mathutils.Vector` | Arc-length samples of the path. |
 
-**Returns** (tuple): `(sections, rings)`; `rings` is empty when rings are off.
+**Returns** (tuple): `(sections, rings)`; `sections` is None for a fan without rings (natural fan); `rings` is empty when rings are off.
+
+### `natural_fan_sections(context, objs, points)`
+
+Ring sections `(u, half_width, half_thickness, angle)` of the natural fan.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `context` | `bpy.types.Context` | Context (`scene.myogen`: bones, ring count). |
+| `objs` | dict | Muscle objects (attachments). |
+| `points` | list of `mathutils.Vector` | Arc-length samples of the path. |
+
+**Returns** (list of tuple): 
 
 ### `solid_mesh(context, muscle_name, report=None, voxel_scale=1.0)`
 
 Build the solid belly of a muscle into a new mesh datablock (world space).
 
 Body = the tube along the path (`tube.path_tube`, sections from the
-rings or the type's profile), plus the fossa fill for Fan and Sheet. The
-rings are put back perpendicular to the path afterwards.
+rings or the type's profile) or, for fan muscles, the fibres from the
+origin to the insertion (`fan.fibres`). The rings are put back
+perpendicular to the path afterwards.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `context` | `bpy.types.Context` | Context. |
 | `muscle_name` | str | Muscle (collection `muscles/<muscle_name>`). |
 | `report` | dict | Optional dict, see `build_belly`. |
-| `voxel_scale` | float | See `build_belly`. |
+| `voxel_scale` | float | See `build_belly`; > 1 also uses fewer fibres. |
 
 **Returns** (tuple): `(mesh, weights)`.
 
@@ -274,7 +253,9 @@ rings are put back perpendicular to the path afterwards.
 
 ### `update_tube(context, muscle_name)`
 
-Rewrite the wire tube `<M>_tube` from the current path and rings (instant feedback).
+Rewrite the wire `<M>_tube` from the current path and rings (instant feedback).
+
+A belly shows its tube; a fan shows a subset of its fibres (their courses).
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -390,7 +371,7 @@ Update callback of every belly setting: schedule a live rebuild.
 
 ### `on_shape_changed(context)`
 
-Muscle type changed: rebuild the live preview (Fan / Sheet add the fossa fill).
+Muscle type changed: rebuild the live preview (Fan builds the belly from fibres).
 
 The path and the rings are kept; *Reset Rings* sizes the rings with the
 new type's profile.

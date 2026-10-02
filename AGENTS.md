@@ -18,8 +18,8 @@ generated in `devdocs/reference/`.
 | attachment/bone geometry, default course, path writing (legacy loft) | `AddonFolder/preview.py` |
 | path sampling, tube along the path, type profiles | `AddonFolder/tube.py` |
 | section rings on the path (slide, size, turn) | `AddonFolder/rings.py` |
-| solid belly (fossa fill, fascia, bone subtraction, meshing), live preview, measured path, final mesh | `AddonFolder/volume_builder.py` |
-| fossa selection operators | `AddonFolder/core_operators.py` (`Select_Fossa_Op`, `Submit_Fossa_Op`) |
+| solid belly (tube or fibres, bone subtraction, meshing), live preview, final mesh | `AddonFolder/volume_builder.py` |
+| fan-shaped muscles (fibres from the origin area to the insertion) | `AddonFolder/fan.py` |
 | how loft contours are joined | `AddonFolder/contour_matching.py` (pure, unit-tested) |
 | volume of defective bellies | `myo_record.mesh_defects`, `robust_volume`, `enclosed_volume`, `winding_volume` |
 | settings | `AddonFolder/properties.py` (`scene.myogen`) |

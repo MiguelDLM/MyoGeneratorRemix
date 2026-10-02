@@ -183,10 +183,6 @@ SHAPE_PRESETS = {
 }
 
 
-#: Shapes whose final mesh defaults to filling the fossa around the origin.
-SPACE_FILLING_SHAPES = {'FAN', 'SHEET'}
-
-
 def belly_bump(t, peak):
     """Belly profile: 0 at both ends, 1 at ``peak``, smooth in between.
 
@@ -768,7 +764,7 @@ PATH_LIFT = 0.25
 #: The second and fourth path points bulge along the attachment normals by
 #: this fraction of the origin-insertion distance.
 PATH_BEND = 0.15
-#: Custom property marking a path computed from the belly (Fill fossa).
+#: Custom property marking a computed (not user-edited) path.
 AUTO_PATH_KEY = "myo_path_auto"
 
 

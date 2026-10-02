@@ -15,7 +15,7 @@ attachments (e.g. a fusiform muscle between two long bones).
 | Name | Value |
 |---|---|
 | `ATTACHMENT_RADIUS_FRACTION` | `0.6` |
-| `TYPE_PROFILES` | `{'FUSIFORM': (0.8, 1.0), 'PARALLEL': (0.0, 0.6), 'FAN': (-0.3, 0.8), 'SHEET': (-0.3, 0....` |
+| `TYPE_PROFILES` | `{'FUSIFORM': (0.8, 1.0), 'PARALLEL': (0.0, 0.6), 'FAN': (0.0, 0.8)}` |
 | `DEFAULT_SECTIONS` | `5` |
 | `ELLIPSE_POINTS` | `32` |
 | `CURVE_RESOLUTION` | `32` |

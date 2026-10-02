@@ -8,7 +8,7 @@ import os
 import bpy
 import bmesh
 
-from . import muscle_metrics, myo_record, volume_builder
+from . import muscle_metrics, myo_record
 from .muscle_utilities import select_and_edit_object
 
 
@@ -426,65 +426,6 @@ class Submit_Insertion_Op(bpy.types.Operator):
     def execute(self, context):
         create_mesh_from_selected_faces(self, "insertion")
         return {'FINISHED'}
-
-
-class Select_Fossa_Op(bpy.types.Operator):
-    """Select the fossa the muscle fills on the origin bone (optional)"""
-    bl_idname = "myogen.select_fossa"
-    bl_label = "Select Fossa"
-    bl_description = ("Optional, for Fill fossa: enter Edit Mode on the origin bone to select the whole region "
-                      "the muscle covers, up to the crests and the zygomatic arch; then Submit Fossa")
-
-    def execute(self, context):
-        select_and_edit_object(context.scene.myogen.origin_object)
-        return {'FINISHED'}
-
-
-class Submit_Fossa_Op(bpy.types.Operator):
-    """Store the selected faces as the fossa the muscle fills"""
-    bl_idname = "myogen.submit_fossa"
-    bl_label = "Submit Fossa"
-    bl_description = "Store the selected faces as <muscle>_fossa: Fill fossa then uses it instead of the reach"
-
-    @classmethod
-    def poll(cls, context):
-        return context.object is not None and context.object.mode == 'EDIT'
-
-    def execute(self, context):
-        name = context.scene.myogen.muscle_name
-        _remove_objects((f"{name}_fossa", f"{name}_fossa_contour"))
-        create_mesh_from_selected_faces(self, "fossa")
-        _remove_objects((f"{name}_fossa_contour",))           # only the surface is needed
-        fossa = bpy.data.objects.get(f"{name}_fossa")
-        if fossa is not None:
-            fossa.hide_set(True)
-        volume_builder.schedule_rebuild(context)
-        return {'FINISHED'}
-
-
-class Remove_Fossa_Op(bpy.types.Operator):
-    """Forget the submitted fossa and use the reach again"""
-    bl_idname = "myogen.remove_fossa"
-    bl_label = "Remove Fossa"
-    bl_description = "Delete <muscle>_fossa; Fill fossa then uses the reach around the origin"
-
-    def execute(self, context):
-        _remove_objects((f"{context.scene.myogen.muscle_name}_fossa",))
-        volume_builder.schedule_rebuild(context)
-        return {'FINISHED'}
-
-
-def _remove_objects(names):
-    for name in names:
-        obj = bpy.data.objects.get(name)
-        if obj is not None:
-            data = obj.data
-            bpy.data.objects.remove(obj, do_unlink=True)
-            if data is not None and data.users == 0:
-                if isinstance(data, bpy.types.Mesh):
-                    bpy.data.meshes.remove(data)
-                elif isinstance(data, bpy.types.Curve):
-                    bpy.data.curves.remove(data)
 
 
 class Next_Muscle_Op(bpy.types.Operator):
