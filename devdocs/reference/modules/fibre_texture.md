@@ -45,13 +45,14 @@ the attributes at once.
 | `DEFAULT_BUNDLES` | `30.0` |
 | `MATERIAL_CELLS_ACROSS` | `144.0` |
 | `BUMP_PER_BUNDLE` | `2.0` |
+| `FIELD_FIBRES` | `160` |
 | `DEFAULT_TENDON_FADE` | `0.08` |
 | `DEFAULT_TENDON` | `0.01` |
 | `DEFAULT_PENNATION` | `20.0` |
 
 ## Functions
 
-### `fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_PENNATION, bundles=None)`
+### `fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_PENNATION, bundles=None, attachment_u=None, fan_field=None)`
 
 Fibre texture coordinates of points of a belly.
 
@@ -62,8 +63,35 @@ Fibre texture coordinates of points of a belly.
 | `arrangement` | str | One of `ARRANGEMENTS`. |
 | `pennation_deg` | float | Angle between fibres and tendon (pennate arrangements). |
 | `bundles` | float | Fibre bundles across the muscle's width drawn by the material (default `DEFAULT_BUNDLES`); scales the across and depth coordinates. |
+| `attachment_u` | `numpy.ndarray` | Position between the attachments (0 at the origin, 1 at the insertion) of every point (`attachment_position`). Smooth everywhere, unlike the nearest point of the path, which jumps where a broad muscle is equally far from two parts of a curved path (a line across the texture). Default: the nearest point of the path. |
+| `fan_field` | tuple | Fibre bundle sections of the fan model (`fan_fibre_field`): for `CONVERGENT` the phase of every point is its position across that bundle at its `u`, so the texture's fibres spread over the whole origin and converge on the insertion like the fan's fibres. |
 
 **Returns** (tuple of `numpy.ndarray`): `(coords, u)`: (N, 3) `(along, phase, depth)` in units such that `bundles` bundles span the mean width, and (N,) position along the path (0-1).
+
+### `attachment_position(d_origin, d_insertion)`
+
+Smooth position between the attachments: 0 on the origin, 1 on the insertion.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `d_origin` | `numpy.ndarray` | Distance of each point to the origin attachment. |
+| `d_insertion` | `numpy.ndarray` | Distance to the insertion attachment. |
+
+**Returns** (`numpy.ndarray`): 
+
+### `fan_fibre_field(path_points, origin_surface, insertion_surface, bones, count=FIELD_FIBRES)`
+
+Section of the fan's fibre bundle along the muscle: centre, widest direction, half-width.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `path_points` | list of `mathutils.Vector` | Arc-length samples of the path. |
+| `origin_surface` | `bpy.types.Object` | Origin attachment surface. |
+| `insertion_surface` | `bpy.types.Object` | Insertion attachment surface. |
+| `bones` | sequence of `bpy.types.Object` | `(origin_bone, insertion_bone)`. |
+| `count` | int | Number of fibres. |
+
+**Returns** (tuple of `numpy.ndarray`): `(us, centres, axes, half_widths)` per fibre sample along the muscle (u from 0 to 1): the fibres' centre, their widest direction (sign kept consistent) and half-width (world units).
 
 ### `bundle_size(vertices, coords)`
 

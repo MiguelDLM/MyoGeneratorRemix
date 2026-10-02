@@ -193,9 +193,17 @@ solid within `Object.myogen_tendon_origin` / `_insertion` of it, then a fade
 of width `Object.myogen_tendon_fade` (all fractions of the muscle length;
 extent and softness are independent).
 
-`fibre_texture.fibre_coordinates` measures every vertex along the path,
+`fibre_texture.fibre_coordinates` measures every vertex along the muscle,
 across the section's width and through its thickness (width direction per
-section, kept for round sections and smoothed along the path).
+section, kept for round sections and smoothed along the path). The position
+along the muscle is `d_origin / (d_origin + d_insertion)` from the distances
+to the two attachment surfaces (`attachment_position`): smooth everywhere
+(the nearest point of a curved path jumps across broad muscles, which drew a
+line across the texture). For Convergent, the phase is the position across
+the fan model's fibre bundle at that place (`fan_fibre_field`: centre,
+widest direction and half-width of the fibres of `fan.fibres`), so the
+texture's fibres spread over the whole origin and converge on the
+insertion.
 Longitudinal arrangements use the angle around the section's axis (times a
 smoothed local radius for Parallel, a constant one for Fusiform/Convergent,
 so fibres converge as the section narrows); pennate ones use the position

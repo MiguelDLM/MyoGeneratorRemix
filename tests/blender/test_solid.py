@@ -472,6 +472,30 @@ class SolidTest(unittest.TestCase):
         props.muscle_shape = 'FAN'
         self.assertEqual(self.generate().myogen_fibres, 'CONVERGENT')
 
+    def test_fibre_texture_has_no_jumps_on_a_curved_fan(self):
+        """A broad fan along a curved path: the nearest path point jumps there; the texture must not."""
+        import numpy as np
+        props = bpy.context.scene.myogen
+        props.muscle_shape = 'FAN'
+        coll, objs = self.preview.muscle_objects(bpy.context)
+        pts = self.preview.default_path_points(props, self.origin, self.insertion)
+        pts[2] = pts[2] + Vector((14.0, 0.0, 0.0))                    # strongly bent path
+        self.preview.write_path(coll, M, pts)
+        belly = self.generate()
+        me = belly.data
+        for name in ("myo_fibre",):
+            f = np.empty(len(me.vertices) * 3, np.float32)
+            me.attributes[name].data.foreach_get("vector", f)
+            f = f.reshape(-1, 3)
+            e = np.empty(len(me.edges) * 2, np.int64)
+            me.edges.foreach_get("vertices", e)
+            e = e.reshape(-1, 2)
+            co = np.array([v.co for v in me.vertices])
+            length = np.maximum(np.linalg.norm(co[e[:, 0]] - co[e[:, 1]], axis=1), 1e-12)
+            for comp in (0, 1):                                        # along, across
+                grad = np.abs(f[e[:, 0], comp] - f[e[:, 1], comp]) / length
+                self.assertLess(float(grad.max()), 20.0 * float(np.median(grad)) + 1e-9, comp)
+
     def test_regenerating_replaces_the_belly(self):
         first = self.generate()
         bpy.context.scene.myogen.muscle_shape = 'FAN'

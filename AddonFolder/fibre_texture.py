@@ -64,6 +64,8 @@ DEFAULT_BUNDLES = 30.0
 MATERIAL_CELLS_ACROSS = 144.0
 #: Bump depth of the texture, in bundle widths.
 BUMP_PER_BUNDLE = 2.0
+#: Fibres of the fan model used to orient a Convergent texture.
+FIELD_FIBRES = 160
 #: Default width of the fade from tendon to muscle (fraction of the muscle).
 DEFAULT_TENDON_FADE = 0.08
 #: Default solid tendon reach from each attachment (fraction of the muscle).
@@ -73,7 +75,7 @@ DEFAULT_PENNATION = 20.0
 
 
 def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_PENNATION,
-                      bundles=None):
+                      bundles=None, attachment_u=None, fan_field=None):
     """Fibre texture coordinates of points of a belly.
 
     :arg vertices: World-space vertex positions, (N, 3).
@@ -88,6 +90,18 @@ def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_
        material (default ``DEFAULT_BUNDLES``); scales the across and depth
        coordinates.
     :type bundles: float
+    :arg attachment_u: Position between the attachments (0 at the origin, 1 at
+       the insertion) of every point (:func:`attachment_position`). Smooth
+       everywhere, unlike the nearest point of the path, which jumps where a
+       broad muscle is equally far from two parts of a curved path (a line
+       across the texture). Default: the nearest point of the path.
+    :type attachment_u: :class:`numpy.ndarray`
+    :arg fan_field: Fibre bundle sections of the fan model
+       (:func:`fan_fibre_field`): for ``CONVERGENT`` the phase of every point
+       is its position across that bundle at its ``u``, so the texture's
+       fibres spread over the whole origin and converge on the insertion
+       like the fan's fibres.
+    :type fan_field: tuple
     :return: ``(coords, u)``: (N, 3) ``(along, phase, depth)`` in units such
        that ``bundles`` bundles span the mean width, and (N,) position along
        the path (0-1).
@@ -112,8 +126,12 @@ def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_
         d = np.linalg.norm(V - (P[i] + np.outer(t, ab)), axis=1)
         closer = d < best
         best[closer], seg[closer], par[closer] = d[closer], i, t[closer]
-    along = cum[seg] + par * seg_len[seg]
-    u = along / length
+    if attachment_u is not None:
+        u = np.clip(np.asarray(attachment_u, dtype=float), 0.0, 1.0)
+        along = u * length
+    else:
+        along = cum[seg] + par * seg_len[seg]
+        u = along / length
     k = np.clip(np.rint(seg + par).astype(int), 0, len(P) - 1)
     centre = P[seg] + (P[seg + 1] - P[seg]) * par[:, None]
     d = V - centre
@@ -168,6 +186,8 @@ def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_
     # unlike an angle around the axis, which wraps) and the smoothed width.
     if arrangement == 'PARALLEL':
         phase, fibre_along = a, along                          # constant spacing
+    elif arrangement == 'CONVERGENT' and fan_field is not None:
+        phase, fibre_along = _field_phase(V, u, fan_field), along   # across the fan's own fibre bundle
     elif arrangement in ('FUSIFORM', 'CONVERGENT'):
         phase, fibre_along = a / hw * float(np.mean(half)), along   # converge as the section narrows
     else:
@@ -188,6 +208,66 @@ def fibre_coordinates(vertices, path_points, arrangement, pennation_deg=DEFAULT_
     k = (bundles or DEFAULT_BUNDLES) / MATERIAL_CELLS_ACROSS / width
     coords = np.stack([fibre_along, phase, r], axis=1) * k
     return coords, u
+
+
+def attachment_position(d_origin, d_insertion):
+    """Smooth position between the attachments: 0 on the origin, 1 on the insertion.
+
+    :arg d_origin: Distance of each point to the origin attachment.
+    :type d_origin: :class:`numpy.ndarray`
+    :arg d_insertion: Distance to the insertion attachment.
+    :type d_insertion: :class:`numpy.ndarray`
+    :rtype: :class:`numpy.ndarray`
+    """
+    return d_origin / np.maximum(d_origin + d_insertion, 1e-12)
+
+
+def fan_fibre_field(path_points, origin_surface, insertion_surface, bones, count=FIELD_FIBRES):
+    """Section of the fan's fibre bundle along the muscle: centre, widest direction, half-width.
+
+    :arg path_points: Arc-length samples of the path.
+    :type path_points: list of :class:`mathutils.Vector`
+    :arg origin_surface: Origin attachment surface.
+    :type origin_surface: :class:`bpy.types.Object`
+    :arg insertion_surface: Insertion attachment surface.
+    :type insertion_surface: :class:`bpy.types.Object`
+    :arg bones: ``(origin_bone, insertion_bone)``.
+    :type bones: sequence of :class:`bpy.types.Object`
+    :arg count: Number of fibres.
+    :type count: int
+    :return: ``(us, centres, axes, half_widths)`` per fibre sample along the
+       muscle (u from 0 to 1): the fibres' centre, their widest direction
+       (sign kept consistent) and half-width (world units).
+    :rtype: tuple of :class:`numpy.ndarray`
+    """
+    from . import fan
+    courses, _radii, _natural = fan.fibres(path_points, origin_surface, insertion_surface, bones, count)
+    n = courses.shape[1]
+    us = np.linspace(0.0, 1.0, n)
+    centres = courses.mean(0)
+    axes = np.empty((n, 3))
+    halves = np.empty(n)
+    previous = None
+    for k in range(n):
+        rel = courses[:, k, :] - centres[k]
+        _w, v = np.linalg.eigh(rel.T @ rel)
+        axis = v[:, 2]
+        if previous is not None and axis @ previous < 0.0:
+            axis = -axis
+        axes[k], previous = axis, axis
+        halves[k] = max(float(np.abs(rel @ axis).max()), 1e-9)
+    return us, centres, axes, halves
+
+
+def _field_phase(vertices, u, field):
+    """Position of every point across the fan's fibre bundle at its ``u``, scaled so
+    the fibres converge as the bundle narrows (constant phase along a fibre)."""
+    us, centres, axes, halves = field
+    c = np.stack([np.interp(u, us, centres[:, i]) for i in range(3)], axis=1)
+    a = np.stack([np.interp(u, us, axes[:, i]) for i in range(3)], axis=1)
+    a /= np.maximum(np.linalg.norm(a, axis=1), 1e-12)[:, None]
+    hw = np.interp(u, us, halves)
+    return np.einsum('ij,ij->i', np.asarray(vertices) - c, a) / hw * float(np.mean(halves))
 
 
 def bundle_size(vertices, coords):
@@ -283,14 +363,21 @@ def apply_fibre_texture(context, belly, arrangement=None, pennation_deg=None):
     mesh.vertices.foreach_get("co", co)
     m = np.array(belly.matrix_world)
     V = co.reshape(-1, 3) @ m[:3, :3].T + m[:3, 3]
-    coords, u = fibre_coordinates(V, tube.sample_path(path), arrangement, pennation_deg,
-                                  belly.myogen_fibre_bundles)
     objs = myo_record.resolve_objects(coll)
     points = tube.sample_path(path)
     length = sum((b - a).length for a, b in zip(points[:-1], points[1:])) or 1.0
     far = np.full(len(V), np.inf)
     d_o = attachment_distance(V, objs["origin"]) / length if objs.get("origin") else far
     d_i = attachment_distance(V, objs["insertion"]) / length if objs.get("insertion") else far
+    both = objs.get("origin") is not None and objs.get("insertion") is not None
+    field = None
+    if arrangement == 'CONVERGENT' and both:
+        props = context.scene.myogen
+        field = fan_fibre_field(points, objs["origin"], objs["insertion"],
+                                (props.origin_object, props.insertion_object))
+    coords, u = fibre_coordinates(V, points, arrangement, pennation_deg, belly.myogen_fibre_bundles,
+                                  attachment_u=attachment_position(d_o, d_i) if both else None,
+                                  fan_field=field)
     tendon = tendon_mask(d_o, d_i, belly.myogen_tendon_origin, belly.myogen_tendon_insertion,
                          belly.myogen_tendon_fade)
     bump = np.full(len(u), bundle_size(V, coords) * BUMP_PER_BUNDLE * belly.myogen_relief)
