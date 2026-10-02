@@ -135,6 +135,12 @@ def world_tree(obj):
     return tree
 
 
+def fibres_far_points(surface):
+    """World positions of the vertices of an attachment surface."""
+    import numpy as np
+    return np.array([list(surface.matrix_world @ v.co) for v in surface.data.vertices])
+
+
 class SolidTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -495,6 +501,54 @@ class SolidTest(unittest.TestCase):
             for comp in (0, 1):                                        # along, across
                 grad = np.abs(f[e[:, 0], comp] - f[e[:, 1], comp]) / length
                 self.assertLess(float(grad.max()), 20.0 * float(np.median(grad)) + 1e-9, comp)
+
+    def test_belly_fibres_give_the_fibre_length(self):
+        """Fibres traced through the finished belly reach the insertion and feed the PCSA."""
+        import numpy as np
+        props = bpy.context.scene.myogen
+        props.muscle_shape = 'FAN'
+        belly = self.generate()
+        bf = sys.modules[f"{test_metrics.MODULE_NAME}.belly_fibres"]
+        mm = sys.modules[f"{test_metrics.MODULE_NAME}.muscle_metrics"]
+        fibres = bf.belly_fibres(belly, self.coll.objects[M + "_origin"], self.coll.objects[M + "_insertion"], 60)
+        self.assertGreater(fibres["reached"], 0.9)
+        self.assertGreater(fibres["covered"], 0.9)
+        self.assertGreater(fibres["covered_insertion"], 0.9)              # seeded from both attachments
+        self.assertGreater(fibres["origin_contact"], 0.9)
+        self.assertGreater(fibres["insertion_contact"], 0.9)
+        self.assertLess(fibres["detoured"], 0.05)
+        self.assertAlmostEqual(float(fibres["shares"].sum()), 1.0, places=6)
+        self.assertAlmostEqual(float(fibres["weights"].sum()), 1.0, places=6)
+        ins = self.coll.objects[M + "_insertion"]
+        ends = np.array([c[-1] for c in fibres["courses"]])
+        gaps = np.array([float(np.linalg.norm(ends - p, axis=1).min()) for p in fibres_far_points(ins)])
+        area = sum(f.area for f in ins.data.polygons)
+        spacing = (area / (len(ends) / 2)) ** 0.5                         # half the fibres are seeded on it
+        self.assertGreater(float(np.mean(gaps < 1.5 * spacing)), 0.9)     # fibres reach all of the insertion
+        rows, _ = mm.compute_muscles(bpy.context, write=False)
+        path_row = rows[0]
+        self.assertEqual(path_row["myo_fiber_length_source"], "PATH")
+        props.fiber_length_source = 'BELLY_FIBRES'
+        props.belly_fibre_count = 60
+        row = mm.compute_muscles(bpy.context, write=False)[0][0]
+        self.assertEqual(row["myo_fiber_length_source"], "BELLY_FIBRES")
+        linear = row["myo_linear_length_m"]
+        self.assertGreater(row["myo_fiber_length_m"], 0.7 * linear)                 # attachment to attachment
+        self.assertLess(row["myo_fiber_length_m"], 1.5 * row["myo_path_length_m"])
+        self.assertLessEqual(row["myo_fiber_length_min_m"], row["myo_fiber_length_m"])
+        self.assertGreaterEqual(row["myo_fiber_length_max_m"], row["myo_fiber_length_m"])
+        self.assertAlmostEqual(row["myo_pcsa_m2"], row["myo_volume_m3"] / row["myo_fiber_length_m"])
+        props.pcsa_model = 'WEIGHTED'
+        weighted = mm.compute_muscles(bpy.context, write=False)[0][0]
+        self.assertIn("sum(V_i", weighted["myo_pcsa_method"])
+        self.assertGreater(weighted["myo_pcsa_m2"], 0.0)
+        # display toggles
+        self.assertEqual(bpy.ops.myogen.show_belly_fibres(), {'FINISHED'})
+        shown = self.coll.objects.get(M + bf.FIBRES_SUFFIX)
+        self.assertIsNotNone(shown)
+        self.assertTrue(np.isfinite(weighted["myo_pcsa_m2"]))
+        self.assertEqual(bpy.ops.myogen.show_belly_fibres(), {'FINISHED'})
+        self.assertIsNone(self.coll.objects.get(M + bf.FIBRES_SUFFIX))
 
     def test_regenerating_replaces_the_belly(self):
         first = self.generate()

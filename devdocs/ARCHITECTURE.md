@@ -258,15 +258,55 @@ roles copied.
 | hole error | relative volume change after filling the belly's holes |
 | path length | evaluated Bezier length of `<M>_curve` (sampled, not control points) |
 | linear length | straight distance between origin and insertion centroids |
-| fibre length | `path length × fibre/muscle ratio` (default 1, Herbst et al. 2022) |
-| PCSA | `volume × cos(pennation) / fibre length` (defaults: parallel fibres, no tendon) |
+| fibre length | `Fibre length from` = **Path (MyoGenerator)**, the default: `path length × ratio` (ratio 1 = the original MyoGenerator, Herbst et al. 2022); or **Belly fibres**: weighted `mean(L_i) × ratio`, `L_i` the fibres traced through the finished belly (see *Belly fibres* below) |
+| PCSA | `volume × cos(pennation) / fibre length` (defaults: parallel fibres, no tendon); with belly fibres, optionally **Sum over fibres**: `cos(pennation) × Σ V_i / (L_i × ratio)`, `V_i` each fibre's share of the volume (`myo_record.pcsa_from_fibres`) |
 | force | `PCSA × specific tension` (default 30 N/cm² = 0.3 N/mm²) |
 | mass | `volume × density` (default 1.0597 g/cm³) |
 
 CSV columns: `name, side, volume_cm3, volume_raw_cm3, volume_method, mass_g, path_length_cm, fiber_length_cm,
 linear_length_cm, origin_area_cm2, insertion_area_cm2, pcsa_cm2, force_N,
 origin_centroid_BU, insertion_centroid_BU, density_g_cm3,
-specific_tension_N_cm2, fiber_length_ratio, pennation_deg, qa`.
+specific_tension_N_cm2, fiber_length_ratio, pennation_deg, fiber_length_source,
+fiber_count, fiber_length_sd_cm, fiber_length_min_cm, fiber_length_max_cm,
+fiber_reached, fiber_detoured, origin_contact, insertion_contact, pcsa_method, qa`.
+
+### Belly fibres
+
+`belly_fibres.belly_fibres` follows Choi & Blemker (2013, PLoS ONE 8:
+e77576): the finished belly (closed first by a temporary voxel remesh, so
+sculpted meshes with holes or self-overlaps work) is voxelised; Laplace's
+equation is solved inside it (conjugate gradients) with `u = 0` on the voxels
+touching the origin attachment, `u = 1` on those touching the insertion and
+no flux through the rest of its surface; fibres are the streamlines of
+`grad u`, each started at the field's front next to its seed point (the
+fixed layer has no gradient) and closed onto the other attachment.
+
+**Where a fibre ends is not chosen**: it follows the field. The field's
+flux gathers on the parts of an attachment nearest to (and most open to)
+the bulk of the belly, like field lines between two electrodes, so fibres
+seeded evenly over the origin bunch up on part of the insertion (on the
+MUDYS specimens they reached about half of it) and the mean length depends
+on the side seeded (×2 on a temporalis). Fibres are therefore seeded
+evenly over **both** attachments (origin → insertion, and insertion →
+origin reversed), each set with half of the weight: both areas are covered
+and the weighted mean length is symmetric.
+
+Fibres longer than `DETOUR_MAX` (2) × the straight distance between their
+ends are **detours** (the field following a thin curved sheet round a
+bend): they are left out of the lengths and of the volume shares, and shown
+in magenta. Each kept fibre gets the belly voxels nearest to it as its
+volume share. `origin_contact` / `insertion_contact` measure how much of
+each attachment's area the belly touches: no fibre can reach the rest.
+Results are cached until the belly or the attachments change. **Show Belly
+Fibres** draws them as `<M>_belly_fibres` (+ `_detours`).
+
+The fibres run attachment to attachment, tendon included: they measure the
+belly, not fascicles. The ratio still converts them to fascicle length, and
+pennate muscles (fascicles between aponeuroses, not modelled) still need the
+pennation and a ratio. QA warns when the belly touches < 50 % of an
+attachment's area, < 80 % of the fibres arrive, > 10 % detour, or the
+longest fibre exceeds 2.5 × the path; when the fibres cannot be traced the
+path is used, with a warning.
 
 ### Plausibility checks (`myo_record.check_*`)
 

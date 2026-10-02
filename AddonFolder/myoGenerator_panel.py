@@ -264,12 +264,24 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
         col = box.column(align=True)
         col.prop(props, "specific_tension")
         col.prop(props, "density_g_cm3")
+        col.prop(props, "fiber_length_source")
+        fibres = props.fiber_length_source == 'BELLY_FIBRES'
+        if fibres:
+            col.prop(props, "pcsa_model")
+            col.prop(props, "belly_fibre_count")
         col.prop(props, "fiber_length_ratio")
         col.prop(props, "pennation_deg")
+        if fibres:
+            box.operator("myogen.show_belly_fibres", icon='OUTLINER_DATA_CURVES')
         info = box.column(align=True)
         info.scale_y = 0.75
-        info.label(text="PCSA = V·cos(pennation) / (path length × ratio).", icon='INFO')
-        info.label(text="Ratio 1 and 0° reproduce Herbst et al. (2022).", icon='BLANK1')
+        if not fibres:
+            info.label(text="PCSA = V·cos(pennation) / (path length × ratio).", icon='INFO')
+            info.label(text="Ratio 1 and 0° reproduce Herbst et al. (2022).", icon='BLANK1')
+        elif props.pcsa_model == 'WEIGHTED':
+            info.label(text="PCSA = cos(pennation) · Σ Vᵢ / (Lᵢ × ratio).", icon='INFO')
+        else:
+            info.label(text="PCSA = V·cos(pennation) / (mean fibre × ratio).", icon='INFO')
         row = box.row(align=True)
         row.operator("myogen.check_muscles", text="Check Muscles", icon='VIEWZOOM')
         row.operator("myogen.calculate_muscle_parameters", text="Calculate & Export CSV", icon='EXPORT')

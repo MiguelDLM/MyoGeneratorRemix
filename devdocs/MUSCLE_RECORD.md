@@ -42,11 +42,17 @@ Parameters* (`muscle_metrics.compute_muscles`).
 | `myo_mass_kg` | float | volume × density |
 | `myo_path_length_m` | float | evaluated length of the path curve |
 | `myo_linear_length_m` | float | straight distance between the attachment centroids |
-| `myo_fiber_length_m` | float | `path_length × fiber_length_ratio` |
+| `myo_fiber_length_m` | float | `path_length × fiber_length_ratio`, or with `BELLY_FIBRES` the weighted mean belly fibre length × ratio |
 | `myo_pcsa_m2` | float | `volume × cos(pennation) / fiber_length` |
 | `myo_pcsa_method` | str | human-readable assumptions behind the PCSA |
 | `myo_fiber_length_ratio` | float | fibre / muscle length used (1.0 = Herbst et al. 2022) |
 | `myo_pennation_deg` | float | pennation angle used (0 = parallel fibres) |
+| `myo_fiber_length_source` | str | `PATH` (path × ratio, MyoGenerator) or `BELLY_FIBRES` (fibres traced through the belly); optional, absent = `PATH` |
+| `myo_fiber_count` | int | belly fibres measured (`BELLY_FIBRES` only) |
+| `myo_fiber_length_sd_m`, `myo_fiber_length_min_m`, `myo_fiber_length_max_m` | float | spread of the belly fibre lengths × ratio (`BELLY_FIBRES` only) |
+| `myo_fiber_reached` | float | fraction of the traced fibres that reached the other attachment (`BELLY_FIBRES` only) |
+| `myo_fiber_detoured` | float | fraction of the arrived fibres left out as detours (`BELLY_FIBRES` only) |
+| `myo_origin_contact`, `myo_insertion_contact` | float | fraction of each attachment's area the belly touches (`BELLY_FIBRES` only) |
 | `myo_density_g_cm3` | float | density used for the mass |
 | `myo_specific_tension_n_cm2` | float | specific tension used for the force |
 | `myo_force_n` | float | `PCSA × tension` |

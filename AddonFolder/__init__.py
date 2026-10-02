@@ -24,6 +24,7 @@ Package layout (see ``devdocs/ARCHITECTURE.md``):
 * ``volume_builder.py``            - solid belly (tube or fan fibres along the path), live preview, final mesh
 * ``fan.py``                       - fibres of fan-shaped muscles
 * ``fibre_texture.py``             - muscle texture oriented by the fibre arrangement
+* ``belly_fibres.py``              - fibres of a finished belly (Laplacian field) for the fibre length
 * ``curve_utilities.py``           - path-curve validation, sampling and orientation frames
 * ``muscle_utilities.py``          - selection helpers and contour alignment
 * ``muscle_texture.py``            - procedural muscle material
@@ -38,7 +39,7 @@ from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
                             Select_Insertion_Op, Submit_Origin_Op,
                             Submit_Insertion_Op, Next_Muscle_Op,
                             Calculate_Muscle_Parameters_Op,
-                            Check_Muscles_Op, Set_Unit_Scale_Op,
+                            Check_Muscles_Op, Show_Belly_Fibres_Op, Set_Unit_Scale_Op,
                             MYOGENERATOR_OT_mirror_duplicate,
                             Estimate_Selected_Volumes_Op)
 from .properties import MyoGeneratorProperties
@@ -92,6 +93,7 @@ classes = (
     Submit_Insertion_Op,
     Calculate_Muscle_Parameters_Op,
     Check_Muscles_Op,
+    Show_Belly_Fibres_Op,
     Set_Unit_Scale_Op,
     Next_Muscle_Op,
     Estimate_Selected_Volumes_Op,

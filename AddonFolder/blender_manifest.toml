@@ -1,9 +1,9 @@
 schema_version = "2.2.0"
 id = "MyoGeneratorRemix"
-version = "3.0.0"
+version = "3.0.0-alpha"
 name = "MyoGeneratorRemix"
 tagline = "Add-on for muscle reconstruction"
-maintainer = "Miguel Díaz de León <migueldlm1307@gmai.com>"
+maintainer = "Miguel Díaz de León <migueldlm1307@gmail.com>"
 type = "add-on"
 website = "https://github.com/MiguelDLM/MyoGeneratorRemix/"
 tags = ["Import-Export", "User Interface"]
@@ -12,8 +12,8 @@ license = [
   "SPDX:GPL-2.0-or-later",
 ]
 copyright = [
-    "Niccolo Fioritti and Eva Herbst 2022",
-    "Miguel Díaz de León 2025" 
+    "2022 Niccolo Fioritti and Eva Herbst",
+    "2025-2026 Miguel Díaz de León",
 ]
 platforms = ["windows-x64", "macos-arm64", "linux-x64"]
 [permissions]

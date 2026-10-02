@@ -96,6 +96,16 @@ class `Check_Muscles_Op` · `core_operators.py`
 
 _No parameters._
 
+### `bpy.ops.myogen.show_belly_fibres()`
+
+**Show Belly Fibres** — Trace the fibres of every finished belly from the origin to the insertion (Laplacian field) and show them as curves, to check the fibre lengths used for the PCSA; again to hide them
+
+Show or hide the fibres traced through every belly
+
+class `Show_Belly_Fibres_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+
+_No parameters._
+
 ### `bpy.ops.myogen.set_unit_scale(unit='MILLIMETERS')`
 
 **Set Unit Scale** — Declare what one Blender unit is in the real specimen

@@ -33,6 +33,21 @@ skull) is used instead.
 
 **Returns** (tuple): `(reference length in m or None, findings)`.
 
+### `measure_fibres(props, belly, origin, insertion, path_m, mpu)`
+
+Belly fibres of one muscle for the fibre length, with their QA findings.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `props` | `bpy.types.PropertyGroup` | Scene settings (`scene.myogen`). |
+| `belly` | `bpy.types.Object` | Belly mesh, or None. |
+| `origin` | `bpy.types.Object` | Origin attachment, or None. |
+| `insertion` | `bpy.types.Object` | Insertion attachment, or None. |
+| `path_m` | float | Path length (m), for the plausibility check. |
+| `mpu` | float | Metres per Blender unit. |
+
+**Returns** (tuple): `(fibres, findings)`; `fibres` (`belly_fibres.belly_fibres`) is None when they cannot be traced (the path is then used).
+
 ### `compute_muscles(context, write=True)`
 
 Measure every muscle, run the plausibility checks and write the records.
@@ -41,7 +56,8 @@ Per muscle: volume and mass (belly; the voxel-enclosed volume replaces the
 signed-sum volume when a closed belly overlaps itself by more than
 `myo_record.OVERLAP_VOLUME_TOLERANCE`), path and straight lengths, fibre length
 and PCSA (`myo_record.pcsa_from_volume` with the scene's ratio and
-pennation), force, attachment areas and centroids, then
+pennation, or `myo_record.pcsa_from_fibres` from the belly fibres
+when `fiber_length_source` is `BELLY_FIBRES`), force, attachment areas and centroids, then
 `myo_record.check_muscle` and the left/right comparison.
 
 | Parameter | Type | Description |

@@ -203,6 +203,26 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
         min=0.05, max=1.0, precision=2, step=1,
         description="Fibre length as a fraction of the muscle path length. 1.0 reproduces "
                     "Herbst et al. (2022); 0.7-0.9 is reported for masticatory muscles")
+    fiber_length_source: bpy.props.EnumProperty(
+        name="Fibre length from",
+        items=[('PATH', "Path (MyoGenerator)",
+                "Fibre length = length of the muscle path x ratio, as in the original MyoGenerator"),
+               ('BELLY_FIBRES', "Belly fibres",
+                "Fibre length = mean length of fibres traced through the finished (sculpted) belly from "
+                "the origin to the insertion (Laplacian field, Choi & Blemker 2013) x ratio")],
+        default='PATH',
+        description="Where the fibre length used for the PCSA comes from")
+    pcsa_model: bpy.props.EnumProperty(
+        name="PCSA",
+        items=[('MEAN', "Volume / mean length", "PCSA = V cos(pennation) / mean fibre length"),
+               ('WEIGHTED', "Sum over fibres",
+                "PCSA = cos(pennation) x sum of (volume share / length) of every fibre: short fibres "
+                "count more, as in a fan-shaped muscle")],
+        default='MEAN',
+        description="How the belly fibres give the PCSA")
+    belly_fibre_count: bpy.props.IntProperty(
+        name="Fibres", default=150, min=20, max=1000,
+        description="Number of belly fibres, spread evenly over the origin attachment")
     pennation_deg: bpy.props.FloatProperty(
         name="Pennation Angle (°)", default=myo_record.DEFAULT_PENNATION_DEG,
         min=0.0, max=60.0, precision=1,

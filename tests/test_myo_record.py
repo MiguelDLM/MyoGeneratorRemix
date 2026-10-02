@@ -36,6 +36,28 @@ class Formulas(unittest.TestCase):
     def test_zero_length(self):
         self.assertEqual(mr.pcsa_from_volume(1e-4, 0.0)[0], 0.0)
 
+    def test_pcsa_from_fibres(self):
+        # equal fibres: both models give V / L
+        pcsa, fiber = mr.pcsa_from_fibres(1e-4, [0.1] * 5, [0.2] * 5)
+        self.assertAlmostEqual(fiber, 0.1)
+        self.assertAlmostEqual(pcsa, 1e-3)
+        self.assertAlmostEqual(mr.pcsa_from_fibres(1e-4, [0.1] * 5, [0.2] * 5, model="WEIGHTED")[0], 1e-3)
+        # half the volume in fibres of 0.05, half in 0.15: sum V_i/L_i = 5e-5/0.05 + 5e-5/0.15
+        lengths, shares = [0.05, 0.15], [0.5, 0.5]
+        pcsa_w, fiber = mr.pcsa_from_fibres(1e-4, lengths, shares, model="WEIGHTED")
+        self.assertAlmostEqual(fiber, 0.1)
+        self.assertAlmostEqual(pcsa_w, 5e-5 / 0.05 + 5e-5 / 0.15)
+        self.assertGreater(pcsa_w, mr.pcsa_from_fibres(1e-4, lengths, shares)[0])     # short fibres count more
+        # ratio and pennation as for the path
+        pcsa, fiber = mr.pcsa_from_fibres(1e-4, [0.1], [1.0], fiber_length_ratio=0.5, pennation_deg=60)
+        self.assertAlmostEqual(fiber, 0.05)
+        self.assertAlmostEqual(pcsa, 1e-4 * 0.5 / 0.05)
+        self.assertEqual(mr.pcsa_from_fibres(1e-4, [], [])[0], 0.0)
+        # weights: mean length weighted
+        pcsa, fiber = mr.pcsa_from_fibres(1e-4, [0.1, 0.2], [0.5, 0.5], weights=[3.0, 1.0])
+        self.assertAlmostEqual(fiber, 0.125)
+        self.assertAlmostEqual(pcsa, 1e-4 / 0.125)
+
     def test_force(self):
         # 10 cm2 at 30 N/cm2 = 300 N
         self.assertAlmostEqual(mr.force_from_pcsa(10e-4, 30), 300.0)

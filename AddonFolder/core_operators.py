@@ -472,6 +472,42 @@ class Check_Muscles_Op(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class Show_Belly_Fibres_Op(bpy.types.Operator):
+    """Show or hide the fibres traced through every belly"""
+    bl_idname = "myogen.show_belly_fibres"
+    bl_label = "Show Belly Fibres"
+    bl_description = ("Trace the fibres of every finished belly from the origin to the insertion (Laplacian "
+                      "field) and show them as curves, to check the fibre lengths used for the PCSA; again "
+                      "to hide them")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from . import belly_fibres
+        collections = myo_record.iter_muscle_collections()
+        removed = [c for c in collections if belly_fibres.remove_fibres(c, c.name)]
+        if removed:
+            self.report({'INFO'}, f"Belly fibres hidden ({len(removed)} muscles)")
+            return {'FINISHED'}
+        shown = 0
+        for coll in collections:
+            objs = myo_record.resolve_objects(coll)
+            if not all(objs.get(k) for k in ("belly", "origin", "insertion")):
+                continue
+            try:
+                fibres = belly_fibres.belly_fibres(objs["belly"], objs["origin"], objs["insertion"],
+                                                   context.scene.myogen.belly_fibre_count)
+            except ValueError as e:
+                self.report({'WARNING'}, f"{coll.name}: {e}")
+                continue
+            belly_fibres.show_fibres(coll, coll.name, fibres["courses"], fibres["detours"])
+            shown += 1
+        if not shown:
+            self.report({'WARNING'}, "No finished bellies with both attachments")
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Belly fibres shown for {shown} muscles")
+        return {'FINISHED'}
+
+
 class Set_Unit_Scale_Op(bpy.types.Operator):
     """Set the scene unit scale"""
     bl_idname = "myogen.set_unit_scale"

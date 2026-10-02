@@ -61,6 +61,9 @@ RECORD_KEYS = (
     "myo_path_length_m", "myo_linear_length_m", "myo_fiber_length_m",
     "myo_pcsa_m2", "myo_pcsa_method",
     "myo_fiber_length_ratio", "myo_pennation_deg",
+    "myo_fiber_length_source", "myo_fiber_count", "myo_fiber_length_sd_m",
+    "myo_fiber_length_min_m", "myo_fiber_length_max_m", "myo_fiber_reached",
+    "myo_fiber_detoured", "myo_origin_contact", "myo_insertion_contact",
     "myo_density_g_cm3", "myo_specific_tension_n_cm2", "myo_force_n",
     "myo_origin_area_m2", "myo_insertion_area_m2",
     "myo_qa", "myo_updated",
@@ -70,6 +73,20 @@ RECORD_KEYS = (
 # fibres, 0.3 N/mm2 = 30 N/cm2. Density: Mendez & Keys (1960), 1.0597 g/cm3.
 DEFAULT_FIBER_LENGTH_RATIO = 1.0
 DEFAULT_PENNATION_DEG = 0.0
+#: Where the fibre length comes from: the muscle path (MyoGenerator), or the
+#: fibres of the finished belly (Laplacian streamlines, Choi & Blemker 2013).
+FIBER_LENGTH_SOURCES = ("PATH", "BELLY_FIBRES")
+#: PCSA from the fibres: ``V cos / mean(Lf)``, or the sum over fibres of
+#: ``V_i cos / Lf_i`` (each fibre's share of the volume over its own length).
+PCSA_MODELS = ("MEAN", "WEIGHTED")
+#: Fibre QA: warn when fewer fibres reach the insertion, or when the longest
+#: fibre exceeds this multiple of the path.
+FIBER_REACHED_MIN = 0.8
+FIBER_MAX_TO_PATH = 2.5
+#: Fibre QA: warn when more than this fraction of the fibres detour.
+FIBER_DETOURED_MAX = 0.1
+#: Fibre QA: warn when the belly touches less than this fraction of an attachment's area.
+ATTACHMENT_CONTACT_MIN = 0.5
 DEFAULT_SPECIFIC_TENSION_N_CM2 = 30.0
 DEFAULT_DENSITY_G_CM3 = 1.0597
 
@@ -135,15 +152,68 @@ def pcsa_from_volume(volume_m3, path_length_m,
     return pcsa, fiber_length_m
 
 
-def pcsa_method_label(fiber_length_ratio, pennation_deg):
+def pcsa_from_fibres(volume_m3, lengths_m, shares, fiber_length_ratio=DEFAULT_FIBER_LENGTH_RATIO,
+                     pennation_deg=DEFAULT_PENNATION_DEG, model="MEAN", weights=None):
+    """PCSA from the lengths of many fibres of a belly.
+
+    ``MEAN``: ``PCSA = V cos(theta) / Lf`` with ``Lf = mean(L_i) x ratio``
+    (mean weighted by ``weights``). ``WEIGHTED``: ``PCSA = cos(theta) x
+    sum_i(V_i / (L_i x ratio))`` with ``V_i = V x share_i``, each fibre's
+    part of the volume; short fibres then count more, as they do in a muscle
+    of mixed fibre lengths (a fan). The returned fibre length is the
+    (weighted) ``mean(L_i) x ratio`` in both cases.
+
+    :arg volume_m3: Muscle volume (m³).
+    :type volume_m3: float
+    :arg lengths_m: Fibre lengths (m), attachment to attachment.
+    :type lengths_m: sequence of float
+    :arg shares: Fraction of the volume of each fibre (sum 1); used by ``WEIGHTED``.
+    :type shares: sequence of float
+    :arg fiber_length_ratio: Fascicle / fibre-line length (tendon excluded).
+    :type fiber_length_ratio: float
+    :arg pennation_deg: Pennation angle (degrees).
+    :type pennation_deg: float
+    :arg model: One of :data:`PCSA_MODELS`.
+    :type model: str
+    :arg weights: Weight of each fibre in the mean length (default equal).
+    :type weights: sequence of float
+    :return: ``(pcsa_m2, fiber_length_m)``; PCSA is 0.0 without positive lengths.
+    :rtype: tuple of float
+    """
+    lengths = [float(x) * fiber_length_ratio for x in lengths_m]
+    weights = [1.0] * len(lengths) if weights is None else [float(w) for w in weights]
+    if not lengths or sum(weights) <= 0.0:
+        return 0.0, 0.0
+    mean = sum(w * x for w, x in zip(weights, lengths)) / sum(weights)
+    if min(lengths) <= 0.0:
+        return 0.0, mean
+    cos = math.cos(math.radians(pennation_deg))
+    if model == "WEIGHTED":
+        total = sum(shares) or 1.0
+        return volume_m3 * cos * sum(v / total / x for v, x in zip(shares, lengths)), mean
+    return volume_m3 * cos / mean, mean
+
+
+def pcsa_method_label(fiber_length_ratio, pennation_deg, source="PATH", model="MEAN"):
     """Human-readable description of the PCSA assumptions, stored in ``myo_pcsa_method``.
 
     :arg fiber_length_ratio: Fibre length / muscle length used.
     :type fiber_length_ratio: float
     :arg pennation_deg: Pennation angle used (degrees).
     :type pennation_deg: float
+    :arg source: One of :data:`FIBER_LENGTH_SOURCES`.
+    :type source: str
+    :arg model: One of :data:`PCSA_MODELS` (only with ``BELLY_FIBRES``).
+    :type model: str
     :rtype: str
     """
+    if source == "BELLY_FIBRES":
+        if model == "WEIGHTED":
+            return (f"PCSA = cos({pennation_deg:g} deg) * sum(V_i / (L_i*{fiber_length_ratio:g})); "
+                    "L_i = belly fibres (Laplacian streamlines from both attachments, detours excluded), "
+                    "V_i = their volume shares")
+        return (f"PCSA = V*cos({pennation_deg:g} deg) / (mean(L_i)*{fiber_length_ratio:g}); "
+                "L_i = belly fibres (Laplacian streamlines from both attachments, detours excluded)")
     return (f"PCSA = V*cos({pennation_deg:g} deg) / (L_path*{fiber_length_ratio:g}); "
             "L_path = evaluated path-curve length; tendon ignored")
 

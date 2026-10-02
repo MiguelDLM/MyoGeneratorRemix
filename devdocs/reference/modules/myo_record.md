@@ -35,6 +35,12 @@ convention (`<M>_origin`, `<M>_muscle`, ...) by `resolve_objects`.
 | `RECORD_KEYS` | `('myo_schema', 'myo_name', 'myo_side', 'myo_origin_obj', 'myo_insertion_obj', 'myo_path...` |
 | `DEFAULT_FIBER_LENGTH_RATIO` | `1.0` |
 | `DEFAULT_PENNATION_DEG` | `0.0` |
+| `FIBER_LENGTH_SOURCES` | `('PATH', 'BELLY_FIBRES')` |
+| `PCSA_MODELS` | `('MEAN', 'WEIGHTED')` |
+| `FIBER_REACHED_MIN` | `0.8` |
+| `FIBER_MAX_TO_PATH` | `2.5` |
+| `FIBER_DETOURED_MAX` | `0.1` |
+| `ATTACHMENT_CONTACT_MIN` | `0.5` |
 | `DEFAULT_SPECIFIC_TENSION_N_CM2` | `30.0` |
 | `DEFAULT_DENSITY_G_CM3` | `1.0597` |
 | `_SIDE_SUFFIXES` | `(('_left', 'L'), ('_right', 'R'), ('_l', 'L'), ('_r', 'R'), ('.l', 'L'), ('.r', 'R'), (...` |
@@ -89,7 +95,30 @@ With the defaults (ratio 1, 0°) this is the Herbst et al. (2022) estimate
 
 **Returns** (tuple of float): `(pcsa_m2, fiber_length_m)`; PCSA is 0.0 when the fibre length is not positive.
 
-### `pcsa_method_label(fiber_length_ratio, pennation_deg)`
+### `pcsa_from_fibres(volume_m3, lengths_m, shares, fiber_length_ratio=DEFAULT_FIBER_LENGTH_RATIO, pennation_deg=DEFAULT_PENNATION_DEG, model='MEAN', weights=None)`
+
+PCSA from the lengths of many fibres of a belly.
+
+`MEAN`: `PCSA = V cos(theta) / Lf` with `Lf = mean(L_i) x ratio`
+(mean weighted by `weights`). `WEIGHTED`: `PCSA = cos(theta) x
+sum_i(V_i / (L_i x ratio))` with `V_i = V x share_i`, each fibre's
+part of the volume; short fibres then count more, as they do in a muscle
+of mixed fibre lengths (a fan). The returned fibre length is the
+(weighted) `mean(L_i) x ratio` in both cases.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `volume_m3` | float | Muscle volume (m³). |
+| `lengths_m` | sequence of float | Fibre lengths (m), attachment to attachment. |
+| `shares` | sequence of float | Fraction of the volume of each fibre (sum 1); used by `WEIGHTED`. |
+| `fiber_length_ratio` | float | Fascicle / fibre-line length (tendon excluded). |
+| `pennation_deg` | float | Pennation angle (degrees). |
+| `model` | str | One of `PCSA_MODELS`. |
+| `weights` | sequence of float | Weight of each fibre in the mean length (default equal). |
+
+**Returns** (tuple of float): `(pcsa_m2, fiber_length_m)`; PCSA is 0.0 without positive lengths.
+
+### `pcsa_method_label(fiber_length_ratio, pennation_deg, source='PATH', model='MEAN')`
 
 Human-readable description of the PCSA assumptions, stored in `myo_pcsa_method`.
 
@@ -97,6 +126,8 @@ Human-readable description of the PCSA assumptions, stored in `myo_pcsa_method`.
 |---|---|---|
 | `fiber_length_ratio` | float | Fibre length / muscle length used. |
 | `pennation_deg` | float | Pennation angle used (degrees). |
+| `source` | str | One of `FIBER_LENGTH_SOURCES`. |
+| `model` | str | One of `PCSA_MODELS` (only with `BELLY_FIBRES`). |
 
 **Returns** (str): 
 

@@ -51,6 +51,9 @@ All MyoGeneratorRemix scene settings, stored under `scene.myogen`.
 | `specific_tension` | float (min 0.0, max 100.0) | `'myo_record.DEFAULT_SPECIFIC_TENSION_N_CM2'` | **Specific Tension (N/cm²)**. Maximum isometric muscle stress used for F = PCSA x tension. 30 N/cm² (0.3 N/mm²) is the usual value; 25 and 37 N/cm² are also used |
 | `density_g_cm3` | float (min 0.0) | `'myo_record.DEFAULT_DENSITY_G_CM3'` | **Muscle Density (g/cm³)**. Density used to compute mass from volume |
 | `fiber_length_ratio` | float (min 0.05, max 1.0) | `'myo_record.DEFAULT_FIBER_LENGTH_RATIO'` | **Fibre/Muscle Length Ratio**. Fibre length as a fraction of the muscle path length. 1.0 reproduces Herbst et al. (2022); 0.7-0.9 is reported for masticatory muscles |
+| `fiber_length_source` | enum in ['PATH', 'BELLY_FIBRES'] | `'PATH'` | **Fibre length from**. Where the fibre length used for the PCSA comes from |
+| `pcsa_model` | enum in ['MEAN', 'WEIGHTED'] | `'MEAN'` | **PCSA**. How the belly fibres give the PCSA |
+| `belly_fibre_count` | int (min 20, max 1000) | `150` | **Fibres**. Number of belly fibres, spread evenly over the origin attachment |
 | `pennation_deg` | float (min 0.0, max 60.0) | `'myo_record.DEFAULT_PENNATION_DEG'` | **Pennation Angle (°)**. Fibre pennation angle; PCSA is multiplied by cos(angle). 0 = parallel fibres |
 | `advanced_selected_volume` | float | `0.0` | **Selected Volume**. Last computed total volume of the selected objects (m³) |
 | `advanced_selected_mass` | float | `0.0` | **Selected Mass**. Last computed total mass of the selected objects (kg) |
