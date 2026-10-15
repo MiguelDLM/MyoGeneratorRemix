@@ -320,8 +320,9 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
     section_cut_solver: bpy.props.EnumProperty(
         name="Solver",
         items=[
-            ('AUTO', "Auto (Fastest)", "Automatically choose the fastest available solver (Manifold / Float)"),
-            ('EXACT', "Exact", "Use exact solver for complex or non-manifold geometry"),
+            ('AUTO', "Auto (Fast)", "Automatically choose the fastest compatible solver (Float / Fast)"),
+            ('EXACT', "Exact", "Use exact solver for complex or coplanar geometry"),
+            ('MANIFOLD', "Manifold", "Fastest solver for strictly manifold meshes only"),
         ],
         default='AUTO', update=on_section_cut_changed,
         description="Boolean solver for cross-section clipping")

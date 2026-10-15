@@ -69,7 +69,7 @@ All MyoGeneratorRemix scene settings, stored under `scene.myogen`.
 | `section_cut_active` | boolean | `False` | **Cross-Section Cut**. Enable non-destructive cross-section clipping for visual inspection |
 | `section_cut_scope` | enum in ['SCENE', 'MUSCLES_BONES', 'MUSCLES', 'ACTIVE'] | `'SCENE'` | **Target Objects**. Which mesh objects receive the cross-section cut |
 | `section_cut_mode` | enum in ['DIFFERENCE', 'INTERSECT'] | `'DIFFERENCE'` | **Cut Mode**. Boolean operation for cross-section clipping |
-| `section_cut_solver` | enum in ['AUTO', 'EXACT'] | `'AUTO'` | **Solver**. Boolean solver for cross-section clipping |
+| `section_cut_solver` | enum in ['AUTO', 'EXACT', 'MANIFOLD'] | `'AUTO'` | **Solver**. Boolean solver for cross-section clipping |
 
 ## Panels
 

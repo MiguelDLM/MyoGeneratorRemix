@@ -24,9 +24,9 @@ Determine the most appropriate Boolean solver for a target object.
 | Parameter | Type | Description |
 |---|---|---|
 | `obj` | `bpy.types.Object` | The target mesh object. |
-| `preferred` | str | Preferred solver ('AUTO' or 'EXACT'). |
+| `preferred` | str | Preferred solver ('AUTO', 'FLOAT', 'EXACT', or 'MANIFOLD'). |
 
-**Returns** (str): Solver identifier supported by Blender ('MANIFOLD', 'FLOAT', 'FAST', or 'EXACT').
+**Returns** (str): Solver identifier supported by Blender ('FLOAT', 'FAST', 'EXACT', or 'MANIFOLD').
 
 ### `find_cutter(context=None)`
 

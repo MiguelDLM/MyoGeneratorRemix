@@ -19,9 +19,9 @@ def best_solver(obj, preferred='AUTO'):
 
     :arg obj: The target mesh object.
     :type obj: :class:`bpy.types.Object`
-    :arg preferred: Preferred solver ('AUTO' or 'EXACT').
+    :arg preferred: Preferred solver ('AUTO', 'FLOAT', 'EXACT', or 'MANIFOLD').
     :type preferred: str
-    :return: Solver identifier supported by Blender ('MANIFOLD', 'FLOAT', 'FAST', or 'EXACT').
+    :return: Solver identifier supported by Blender ('FLOAT', 'FAST', 'EXACT', or 'MANIFOLD').
     :rtype: str
     """
     if preferred == 'EXACT':
@@ -40,7 +40,13 @@ def best_solver(obj, preferred='AUTO'):
     if temp:
         obj.modifiers.remove(mod)
 
-    for cand in ('MANIFOLD', 'FLOAT', 'FAST'):
+    if preferred in available:
+        return preferred
+
+    # For AUTO: prefer FLOAT or FAST as they support arbitrary surface meshes,
+    # including non-manifold edges. MANIFOLD solver fails silently when any
+    # edge or vertex is non-manifold (e.g. at attachment borders or sculpted boundaries).
+    for cand in ('FLOAT', 'FAST', 'EXACT', 'MANIFOLD'):
         if cand in available:
             return cand
     return 'EXACT'
