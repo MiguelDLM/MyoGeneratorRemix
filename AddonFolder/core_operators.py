@@ -848,6 +848,8 @@ class Delete_Muscle_Op(bpy.types.Operator):
         bpy.data.collections.remove(coll)
 
         muscles = myo_record.iter_muscle_collections()
+        if not muscles:
+            muscles = myo_record.iter_all_myo_collections()
         new_active = muscles[0].name if muscles else ""
         if hasattr(props, "active_muscle"):
             props.active_muscle = new_active
@@ -915,7 +917,12 @@ class Select_Muscle_Op(bpy.types.Operator):
 
 
 def _existing_muscle_items(self, context):
-    items = [(c.name, c.name, f"Muscle '{c.name}'") for c in myo_record.iter_muscle_collections()]
+    muscles = myo_record.iter_muscle_collections()
+    muscle_names = {c.name for c in muscles}
+    items = [(c.name, c.name, f"Muscle '{c.name}'") for c in muscles]
+    for c in myo_record.iter_all_myo_collections():
+        if c.name not in muscle_names:
+            items.append((c.name, c.name, f"Structure '{c.name}' (outside muscles)"))
     return items or [("", "No muscles available", "")]
 
 

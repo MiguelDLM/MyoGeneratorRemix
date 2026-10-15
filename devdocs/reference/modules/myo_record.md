@@ -345,7 +345,13 @@ Whether a collection is a MyoGen muscle (has a record, or legacy-named objects).
 
 All MyoGen muscle collections of the file.
 
-**Returns** (list of `bpy.types.Collection`): Muscle collections (children of the root, or collections with a muscle record elsewhere).
+**Returns** (list of `bpy.types.Collection`): Muscle collections (children of the root); empty if there is no root.
+
+### `iter_all_myo_collections()`
+
+All MyoGen collections in the file (in root and elsewhere).
+
+**Returns** (list of `bpy.types.Collection`): Muscle collections in root, followed by any other MyoGen collections.
 
 ### `tag_roles(coll)`
 

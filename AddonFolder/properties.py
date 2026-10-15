@@ -12,7 +12,7 @@ from .volume_builder import on_controls_toggled, on_setting_changed, on_shape_ch
 
 def _set_role_visibility(roles, hide):
     """Show/hide every MyoGen object whose role is in ``roles``."""
-    for coll in myo_record.iter_muscle_collections():
+    for coll in myo_record.iter_all_myo_collections():
         for role, obj in myo_record.resolve_objects(coll).items():
             if role in roles:
                 try:

@@ -324,7 +324,7 @@ class MYOGENERATOR_PT_panel(bpy.types.Panel):
 
         box = layout.box()
         box.label(text="Muscle", icon='GREASEPENCIL')
-        existing_muscles = list(myo_record.iter_muscle_collections())
+        existing_muscles = list(myo_record.iter_all_myo_collections())
         active_name = getattr(props, "active_muscle", "").strip()
         active_coll = bpy.data.collections.get(active_name) if active_name else None
         if active_coll is None or not myo_record.is_muscle_collection(active_coll):

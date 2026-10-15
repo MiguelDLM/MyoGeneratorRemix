@@ -622,24 +622,33 @@ def is_muscle_collection(coll):
 def iter_muscle_collections():
     """All MyoGen muscle collections of the file.
 
-    :return: Muscle collections (children of the root, or collections with a muscle record elsewhere).
+    :return: Muscle collections (children of the root); empty if there is no root.
     :rtype: list of :class:`bpy.types.Collection`
     """
     if bpy is None:
         return []
-    found = []
-    seen = set()
     root = get_root()
-    if root:
-        for c in root.children:
-            if is_muscle_collection(c):
-                found.append(c)
-                seen.add(c.name)
+    if root is None:
+        return []
+    return [c for c in root.children if is_muscle_collection(c)]
+
+
+def iter_all_myo_collections():
+    """All MyoGen collections in the file (in root and elsewhere).
+
+    :return: Muscle collections in root, followed by any other MyoGen collections.
+    :rtype: list of :class:`bpy.types.Collection`
+    """
+    if bpy is None:
+        return []
+    found = list(iter_muscle_collections())
+    seen = {c.name for c in found}
     for c in bpy.data.collections:
         if c.name not in seen and is_muscle_collection(c):
             found.append(c)
             seen.add(c.name)
     return found
+
 
 
 def tag_roles(coll):

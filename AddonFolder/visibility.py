@@ -56,7 +56,7 @@ def objects_by_kind():
     :rtype: dict
     """
     out = {k: [] for k in KINDS}
-    for coll in myo_record.iter_muscle_collections():
+    for coll in myo_record.iter_all_myo_collections():
         roles = {obj: role for role, obj in myo_record.resolve_objects(coll).items()}
         for obj in coll.objects:
             kind = kind_of(obj, coll.name, roles)

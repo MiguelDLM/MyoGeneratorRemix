@@ -236,7 +236,7 @@ class MetricsTest(unittest.TestCase):
             self.assertTrue(obj.name.startswith("temp_renamed_left_"))
 
     def test_collection_outside_root(self):
-        """Muscles or ligaments outside the 'muscles' root collection are discovered and manageable."""
+        """Structures outside the 'muscles' root collection are excluded from muscle QA/analyses, but remain manageable."""
         # Unlink the muscle collection from root and link to scene collection instead
         root = self.mr.get_root()
         coll = bpy.data.collections.get("temp_renamed_left") or self.coll
@@ -245,21 +245,28 @@ class MetricsTest(unittest.TestCase):
         if coll.name not in bpy.context.scene.collection.children:
             bpy.context.scene.collection.children.link(coll)
 
-        # 1. iter_muscle_collections discovers it
-        names = [c.name for c in self.mr.iter_muscle_collections()]
-        self.assertIn(coll.name, names)
+        # 1. iter_muscle_collections excludes it, while iter_all_myo_collections discovers it
+        muscle_names = [c.name for c in self.mr.iter_muscle_collections()]
+        self.assertNotIn(coll.name, muscle_names)
+        all_names = [c.name for c in self.mr.iter_all_myo_collections()]
+        self.assertIn(coll.name, all_names)
 
-        # 2. select_muscle activates it
+        # 2. compute_muscles ignores outside collections
+        rows, _findings = self.metrics.compute_muscles(bpy.context)
+        self.assertNotIn(coll.name, [r["collection"] for r in rows])
+
+        # 3. select_muscle activates it
         props = bpy.context.scene.myogen
         self.assertEqual(bpy.ops.myogen.select_muscle(name=coll.name), {'FINISHED'})
         self.assertEqual(props.active_muscle, coll.name)
 
-        # 3. Rename works outside root
+        # 4. Rename works outside root
         props.muscle_name = "ligament_outside_left"
         self.assertEqual(bpy.ops.myogen.rename_muscle(), {'FINISHED'})
         self.assertIn("ligament_outside_left", bpy.data.collections)
         new_coll = bpy.data.collections["ligament_outside_left"]
-        self.assertIn(new_coll, self.mr.iter_muscle_collections())
+        self.assertNotIn(new_coll.name, [c.name for c in self.mr.iter_muscle_collections()])
+        self.assertIn(new_coll, self.mr.iter_all_myo_collections())
         self.assertEqual(props.active_muscle, "ligament_outside_left")
 
 
