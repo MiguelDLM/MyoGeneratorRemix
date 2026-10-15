@@ -32,6 +32,7 @@ MyoGeneratorRemix/
 │   ├── fibre_texture.py            fibre coordinates per arrangement for the texture (visual)
 │   ├── muscle_metrics.py           measurements, plausibility checks, CSV
 │   ├── myo_record.py               the muscle-record contract (shared with MUFIS)
+│   ├── cross_section.py            non-destructive cross-section slicing for visual inspection
 │   └── myoGenerator_panel.py       sidebar UI (drawing only)
 ├── tests/                        unit tests (no Blender) and tests/blender (headless)
 ├── tools/gen_api_docs.py         API reference generator (owned by MUFIS, copied here)

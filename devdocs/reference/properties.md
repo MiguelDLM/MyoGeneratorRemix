@@ -66,10 +66,15 @@ All MyoGeneratorRemix scene settings, stored under `scene.myogen`.
 | `mirror_axis` | enum in ['X', 'Y', 'Z'] | `'X'` | **Mirror Axis**. World axis across which Mirror Duplicate reflects the selection |
 | `scene_qa` | string | `'[]'` | JSON list of [level, message] from the last scene scale/parameter check |
 | `show_qa_details` | boolean | `True` | **Show details**. List every finding under each muscle in the QA box |
+| `section_cut_active` | boolean | `False` | **Cross-Section Cut**. Enable non-destructive cross-section clipping for visual inspection |
+| `section_cut_scope` | enum in ['SCENE', 'MUSCLES_BONES', 'MUSCLES', 'ACTIVE'] | `'SCENE'` | **Target Objects**. Which mesh objects receive the cross-section cut |
+| `section_cut_mode` | enum in ['DIFFERENCE', 'INTERSECT'] | `'DIFFERENCE'` | **Cut Mode**. Boolean operation for cross-section clipping |
+| `section_cut_solver` | enum in ['AUTO', 'EXACT'] | `'AUTO'` | **Solver**. Boolean solver for cross-section clipping |
 
 ## Panels
 
 | Panel | Space / region | Category | Label | Module |
 |---|---|---|---|---|
+| `MYOGENERATOR_PT_cross_section` | VIEW_3D / UI | MyoGeneratorRemix | Cross-Section Cut | `cross_section.py` |
 | `MYOGENERATOR_PT_panel` | VIEW_3D / UI | MyoGeneratorRemix | MyoGeneratorRemix | `myoGenerator_panel.py` |
 | `MYOGENERATOR_PT_visibility` | VIEW_3D / UI | MyoGeneratorRemix | Show in Scene | `visibility.py` |

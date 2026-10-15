@@ -10,6 +10,26 @@ from . import myo_record
 from .volume_builder import on_controls_toggled, on_setting_changed, on_shape_changed
 
 
+def on_section_cut_toggled(self, context):
+    """Callback when section_cut_active is toggled.
+
+    :arg context: Context.
+    :type context: :class:`bpy.types.Context`
+    """
+    from . import cross_section
+    cross_section.on_cut_toggled(self, context)
+
+
+def on_section_cut_changed(self, context):
+    """Callback when section cut parameters change.
+
+    :arg context: Context.
+    :type context: :class:`bpy.types.Context`
+    """
+    from . import cross_section
+    cross_section.on_cut_changed(self, context)
+
+
 def _set_role_visibility(roles, hide):
     """Show/hide every MyoGen object whose role is in ``roles``."""
     for coll in myo_record.iter_all_myo_collections():
@@ -274,3 +294,35 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
     # Scene-level QA (JSON list of [level, message]); written by the check operators.
     scene_qa: bpy.props.StringProperty(default="[]", description="JSON list of [level, message] from the last scene scale/parameter check")
     show_qa_details: bpy.props.BoolProperty(name="Show details", default=True, description="List every finding under each muscle in the QA box")
+
+    # --- Cross-Section Slicing Tool ---
+    section_cut_active: bpy.props.BoolProperty(
+        name="Cross-Section Cut", default=False, update=on_section_cut_toggled,
+        description="Enable non-destructive cross-section clipping for visual inspection")
+    section_cut_scope: bpy.props.EnumProperty(
+        name="Target Objects",
+        items=[
+            ('SCENE', "All Meshes (Scene)", "Cut all mesh objects in the scene (muscles and bones)"),
+            ('MUSCLES_BONES', "Muscles & Bones", "Cut muscle bellies and origin/insertion bones"),
+            ('MUSCLES', "Muscles Only", "Cut only muscle bellies"),
+            ('ACTIVE', "Active Muscle & Bones", "Cut active muscle belly and its origin/insertion bones"),
+        ],
+        default='SCENE', update=on_section_cut_changed,
+        description="Which mesh objects receive the cross-section cut")
+    section_cut_mode: bpy.props.EnumProperty(
+        name="Cut Mode",
+        items=[
+            ('DIFFERENCE', "Cut Out (Difference)", "Carve out the volume inside the cutter cube"),
+            ('INTERSECT', "Isolate (Intersect)", "Keep only what is inside the cutter cube (slab/slice)"),
+        ],
+        default='DIFFERENCE', update=on_section_cut_changed,
+        description="Boolean operation for cross-section clipping")
+    section_cut_solver: bpy.props.EnumProperty(
+        name="Solver",
+        items=[
+            ('AUTO', "Auto (Fastest)", "Automatically choose the fastest available solver (Manifold / Float)"),
+            ('EXACT', "Exact", "Use exact solver for complex or non-manifold geometry"),
+        ],
+        default='AUTO', update=on_section_cut_changed,
+        description="Boolean solver for cross-section clipping")
+

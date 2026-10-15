@@ -9,6 +9,22 @@ muscle collection (see `myo_record`).
 
 ## Functions
 
+### `on_section_cut_toggled(context)`
+
+Callback when section_cut_active is toggled.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `context` | `bpy.types.Context` | Context. |
+
+### `on_section_cut_changed(context)`
+
+Callback when section cut parameters change.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `context` | `bpy.types.Context` | Context. |
+
 ### `update_muscles_visibility(context)`
 
 Update callback of `show_muscles`: show/hide every muscle belly.

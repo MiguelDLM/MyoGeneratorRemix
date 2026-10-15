@@ -27,6 +27,7 @@ generated in `devdocs/reference/`.
 | settings | `AddonFolder/properties.py` (`scene.myogen`) |
 | UI | `AddonFolder/myoGenerator_panel.py` |
 | show/hide objects by type for every muscle (Show in Scene panel) | `AddonFolder/visibility.py` |
+| cross-section slicing for visual inspection | `AddonFolder/cross_section.py` |
 
 ## Invariants (do not break)
 

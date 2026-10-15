@@ -32,6 +32,7 @@ Package layout (see ``devdocs/ARCHITECTURE.md``):
 * ``muscle_texture.py``            - procedural muscle and ligament materials
 * ``muscle_metrics.py``            - measurements, plausibility checks, CSV export
 * ``myo_record.py``                - the muscle-record contract shared with MUFIS
+* ``cross_section.py``             - non-destructive cross-section slicing for visual inspection
 * ``myoGenerator_panel.py``        - the sidebar UI
 """
 
@@ -55,6 +56,7 @@ from . import preview
 from . import volume_builder
 from . import fibre_texture
 from . import visibility
+from . import cross_section
 from .improved_muscle_workflow import (Muscle_Edit_Path_Op,
                                      Muscle_Reset_Path_Op,
                                      Muscle_Select_Rings_Op,
@@ -122,7 +124,7 @@ classes = (
     MYOGENERATOR_OT_mirror_duplicate,
     MYOGEN_OT_qa_finding,
     MYOGENERATOR_PT_panel,
-) + visibility.classes
+) + visibility.classes + cross_section.classes
 
 
 def register():
@@ -135,6 +137,7 @@ def register():
 
 
 def unregister():
+    cross_section.remove_cut(bpy.context)
     fibre_texture.unregister()
     volume_builder.unregister()
     preview.unregister()

@@ -199,6 +199,60 @@ class `Calculate_Muscle_Parameters_Op` · `core_operators.py` · options `{'REGI
 
 _No parameters._
 
+## `cross_section`
+
+### `bpy.ops.myogen.toggle_section_cut()`
+
+**Toggle Cross-Section Cut** — Enable or disable non-destructive cross-section clipping for visual inspection
+
+Enable or disable the non-destructive cross-section cut
+
+class `MYOGEN_OT_toggle_section_cut` · `cross_section.py` · options `{'REGISTER', 'UNDO'}`
+
+_No parameters._
+
+### `bpy.ops.myogen.align_section_cut(plane='TRANSVERSE')`
+
+**Align Section Cut** — Align the cross-section plane to an anatomical orientation (transverse, sagittal, coronal) or fit
+
+Align the cutter cube to an anatomical plane or fit to selection
+
+class `MYOGEN_OT_align_section_cut` · `cross_section.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `plane` | enum in ['TRANSVERSE', 'SAGITTAL', 'CORONAL', 'ACTIVE', 'FIT_ALL'] | `'TRANSVERSE'` | **Plane**. Anatomical plane to align the cutting box to |
+
+### `bpy.ops.myogen.flip_section_cut()`
+
+**Flip Cut Side** — Invert the cutting side to view the opposite half of the anatomy
+
+Invert the side of the cut
+
+class `MYOGEN_OT_flip_section_cut` · `cross_section.py` · options `{'REGISTER', 'UNDO'}`
+
+_No parameters._
+
+### `bpy.ops.myogen.refresh_section_cut()`
+
+**Refresh Cut Targets** — Re-evaluate and update the cross-section cut on all current scene meshes
+
+Refresh cross-section cut on all current targets
+
+class `MYOGEN_OT_refresh_section_cut` · `cross_section.py` · options `{'REGISTER', 'UNDO'}`
+
+_No parameters._
+
+### `bpy.ops.myogen.select_cutter()`
+
+**Select Cutter Cube** — Select and activate the wireframe cutter cube to move, rotate or scale it in the 3D viewport
+
+Select the cross-section cutter cube in the 3D viewport
+
+class `MYOGEN_OT_select_cutter` · `cross_section.py` · options `{'REGISTER', 'UNDO'}`
+
+_No parameters._
+
 ## `improved_muscle_workflow`
 
 ### `bpy.ops.myogen.muscle_preview_update()`

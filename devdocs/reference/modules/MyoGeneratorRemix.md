@@ -23,6 +23,7 @@ Package layout (see `devdocs/ARCHITECTURE.md`):
 * `muscle_texture.py`            - procedural muscle and ligament materials
 * `muscle_metrics.py`            - measurements, plausibility checks, CSV export
 * `myo_record.py`                - the muscle-record contract shared with MUFIS
+* `cross_section.py`             - non-destructive cross-section slicing for visual inspection
 * `myoGenerator_panel.py`        - the sidebar UI
 
 ## Functions
