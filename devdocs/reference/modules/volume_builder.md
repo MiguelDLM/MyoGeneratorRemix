@@ -48,9 +48,11 @@ solid follows after `LIVE_DELAY` s.
 | `PREVIEW_SUFFIX` | `'_preview'` |
 | `TUBE_SUFFIX` | `'_tube'` |
 | `DRAFT_VOXEL_SCALE` | `1.8` |
+| `FULL_PREVIEW_CELLS` | `1500000` |
 | `LIVE_DELAY` | `0.6` |
 | `WIRE_FIBRES` | `40` |
 | `TUBE_DELAY` | `0.02` |
+| `STATE_TOLERANCE` | `1e-05` |
 
 ## Functions
 
@@ -177,7 +179,7 @@ bone stays exact), joined to a layer over each attachment
 | `bones` | sequence of `bpy.types.Object` | `(origin_bone, insertion_bone)`; None entries are skipped. |
 | `report` | dict | Optional dict filled with `voxel` (BU), `grid`, `seconds`, `anchored`, `islands_removed`, `pieces` (kept disconnected parts) and `stages` (seconds per stage). |
 | `fibres` | tuple | `(courses, radii)` from `fan.fibres`, or None. |
-| `voxel_scale` | float | Multiplies the voxel size (> 1 = faster draft). |
+| `voxel_scale` | float or None | Multiplies the voxel size (> 1 = faster draft). None = automatic preview: the final voxel unless the final grid exceeds `FULL_PREVIEW_CELLS`, then `DRAFT_VOXEL_SCALE` (`report["draft"]` says which). |
 | `min_radius` | float | Smallest section radius (Blender units): the automatic voxel is at most `min_radius / VOXELS_PER_RADIUS`, so thin muscles keep their detail. |
 
 **Returns** (tuple): `(bm, weights)`: world-space bmesh (caller frees it) and per vertex weights (0 = anchored on an attachment, 1 = free).
@@ -256,7 +258,7 @@ perpendicular to the path afterwards.
 | `context` | `bpy.types.Context` | Context. |
 | `muscle_name` | str | Muscle (collection `muscles/<muscle_name>`). |
 | `report` | dict | Optional dict, see `build_belly`. |
-| `voxel_scale` | float | See `build_belly`; > 1 also uses fewer fibres. |
+| `voxel_scale` | float or None | See `build_belly`; > 1 also uses fewer fibres (None, automatic: all of them). |
 
 **Returns** (tuple): `(mesh, weights)`.
 
@@ -281,7 +283,9 @@ A belly shows its tube; a fan shows a subset of its fibres (their courses).
 
 Create or replace `<M>_preview`: the solid belly at draft resolution.
 
-The preview *is* the final shape, only coarser (`DRAFT_VOXEL_SCALE`).
+The preview *is* the final shape: same voxel, fibres and settings, unless
+the muscle is large (`FULL_PREVIEW_CELLS`): then it is coarser
+(`DRAFT_VOXEL_SCALE`) and the status says so.
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -357,6 +361,14 @@ settings or the attachments change.
 ### `stop_live(context)`
 
 Stop updating the preview (the object is kept).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `context` | `bpy.types.Context` | Context. |
+
+### `discard_preview(context)`
+
+Stop the live preview and delete its objects; keep the path and hide the rings.
 
 | Parameter | Type | Description |
 |---|---|---|

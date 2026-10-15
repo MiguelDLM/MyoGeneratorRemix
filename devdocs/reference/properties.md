@@ -25,6 +25,7 @@ All MyoGeneratorRemix scene settings, stored under `scene.myogen`.
 | `origin_object` | pointer to `bpy.types.Object` | `''` | **Origin Bone**. Bone on which the origin area is painted (also the reference size for the scale check) |
 | `insertion_object` | pointer to `bpy.types.Object` | `''` | **Insertion Bone**. Bone on which the insertion area is painted |
 | `muscle_name` | string | `'Insert muscle name'` | **Muscle Name**. Name of the muscle being reconstructed. Use a _left/_right suffix for bilateral muscles (e.g. temp_sup_left) |
+| `active_muscle` | string | `''` | **Active Muscle**. Name of the muscle collection currently active or selected for editing |
 | `muscle_curve_subdivisions` | int (min 4, max 100) | `12` | **Curve Subdivisions**. Number of subdivisions along the muscle curve |
 | `muscle_contour_resolution` | int (min 4, max 100) | `16` | **Contour Resolution**. Resolution of the contour loops (vertex count) |
 | `origin_contour_offset` | int (min 0, max 64) | `0` | **Origin Offset**. Shift origin contour vertices for better alignment |
@@ -53,7 +54,8 @@ All MyoGeneratorRemix scene settings, stored under `scene.myogen`.
 | `fiber_length_ratio` | float (min 0.05, max 1.0) | `'myo_record.DEFAULT_FIBER_LENGTH_RATIO'` | **Fibre/Muscle Length Ratio**. Fibre length as a fraction of the muscle path length. 1.0 reproduces Herbst et al. (2022); 0.7-0.9 is reported for masticatory muscles |
 | `fiber_length_source` | enum in ['PATH', 'BELLY_FIBRES'] | `'PATH'` | **Fibre length from**. Where the fibre length used for the PCSA comes from |
 | `pcsa_model` | enum in ['MEAN', 'WEIGHTED'] | `'MEAN'` | **PCSA**. How the belly fibres give the PCSA |
-| `belly_fibre_count` | int (min 20, max 1000) | `150` | **Fibres**. Number of belly fibres, spread evenly over the origin attachment |
+| `fibre_seeding` | enum in ['BOTH', 'PAIRED', 'ORIGIN', 'INSERTION'] | `'BOTH'` | **Seeding**. Where the belly fibres start |
+| `belly_fibre_count` | int (min 20, max 1000) | `150` | **Fibres**. Number of points spread evenly over each seeded attachment |
 | `pennation_deg` | float (min 0.0, max 60.0) | `'myo_record.DEFAULT_PENNATION_DEG'` | **Pennation Angle (°)**. Fibre pennation angle; PCSA is multiplied by cos(angle). 0 = parallel fibres |
 | `advanced_selected_volume` | float | `0.0` | **Selected Volume**. Last computed total volume of the selected objects (m³) |
 | `advanced_selected_mass` | float | `0.0` | **Selected Mass**. Last computed total mass of the selected objects (kg) |
@@ -70,3 +72,4 @@ All MyoGeneratorRemix scene settings, stored under `scene.myogen`.
 | Panel | Space / region | Category | Label | Module |
 |---|---|---|---|---|
 | `MYOGENERATOR_PT_panel` | VIEW_3D / UI | MyoGeneratorRemix | MyoGeneratorRemix | `myoGenerator_panel.py` |
+| `MYOGENERATOR_PT_visibility` | VIEW_3D / UI | MyoGeneratorRemix | Show in Scene | `visibility.py` |

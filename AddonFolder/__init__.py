@@ -24,10 +24,12 @@ Package layout (see ``devdocs/ARCHITECTURE.md``):
 * ``volume_builder.py``            - solid belly (tube or fan fibres along the path), live preview, final mesh
 * ``fan.py``                       - fibres of fan-shaped muscles
 * ``fibre_texture.py``             - muscle texture oriented by the fibre arrangement
+* ``modes.py``                     - safe return to Object Mode (also with the edited object hidden)
+* ``visibility.py``                - show/hide MyoGen objects by type for every muscle
 * ``belly_fibres.py``              - fibres of a finished belly (Laplacian field) for the fibre length
 * ``curve_utilities.py``           - path-curve validation, sampling and orientation frames
 * ``muscle_utilities.py``          - selection helpers and contour alignment
-* ``muscle_texture.py``            - procedural muscle material
+* ``muscle_texture.py``            - procedural muscle and ligament materials
 * ``muscle_metrics.py``            - measurements, plausibility checks, CSV export
 * ``myo_record.py``                - the muscle-record contract shared with MUFIS
 * ``myoGenerator_panel.py``        - the sidebar UI
@@ -39,21 +41,28 @@ from .core_operators import (Muscle_Name_Submition, Select_Origin_Op,
                             Select_Insertion_Op, Submit_Origin_Op,
                             Submit_Insertion_Op, Next_Muscle_Op,
                             Calculate_Muscle_Parameters_Op,
-                            Check_Muscles_Op, Show_Belly_Fibres_Op, Set_Unit_Scale_Op,
+                            Check_Muscles_Op, Trace_Fibres_Op, Set_Unit_Scale_Op,
                             MYOGENERATOR_OT_mirror_duplicate,
-                            Estimate_Selected_Volumes_Op)
+                            Estimate_Selected_Volumes_Op,
+                            Create_Ligament_Material_Op,
+                            Recall_Attachment_Faces_Op,
+                            Rename_Muscle_Op,
+                            Delete_Muscle_Op,
+                            Select_Muscle_Op,
+                            Select_Muscle_Menu_Op)
 from .properties import MyoGeneratorProperties
 from . import preview
 from . import volume_builder
 from . import fibre_texture
+from . import visibility
 from .improved_muscle_workflow import (Muscle_Edit_Path_Op,
                                      Muscle_Reset_Path_Op,
                                      Muscle_Select_Rings_Op,
                                      Muscle_Reset_Rings_Op,
                                      Muscle_Mesh_Generation_Op,
                                      Muscle_Preview_Update_Op,
-                                     Muscle_Preview_Stop_Op)
-from .myoGenerator_panel import MYOGENERATOR_PT_panel
+                                     Muscle_Preview_Discard_Op)
+from .myoGenerator_panel import MYOGENERATOR_PT_panel, MYOGEN_OT_qa_finding
 
 
 class MyoGeneratorPreferences(bpy.types.AddonPreferences):
@@ -93,20 +102,27 @@ classes = (
     Submit_Insertion_Op,
     Calculate_Muscle_Parameters_Op,
     Check_Muscles_Op,
-    Show_Belly_Fibres_Op,
+    Trace_Fibres_Op,
     Set_Unit_Scale_Op,
     Next_Muscle_Op,
     Estimate_Selected_Volumes_Op,
+    Create_Ligament_Material_Op,
+    Recall_Attachment_Faces_Op,
+    Rename_Muscle_Op,
+    Delete_Muscle_Op,
+    Select_Muscle_Op,
+    Select_Muscle_Menu_Op,
     Muscle_Edit_Path_Op,
     Muscle_Reset_Path_Op,
     Muscle_Select_Rings_Op,
     Muscle_Reset_Rings_Op,
     Muscle_Mesh_Generation_Op,
     Muscle_Preview_Update_Op,
-    Muscle_Preview_Stop_Op,
+    Muscle_Preview_Discard_Op,
     MYOGENERATOR_OT_mirror_duplicate,
+    MYOGEN_OT_qa_finding,
     MYOGENERATOR_PT_panel,
-)
+) + visibility.classes
 
 
 def register():

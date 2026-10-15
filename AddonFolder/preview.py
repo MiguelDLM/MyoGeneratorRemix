@@ -474,6 +474,10 @@ def muscle_objects(context, muscle_name=None):
     root = myo_record.get_root()
     coll = root.children.get(name) if root else None
     if coll is None:
+        candidate = bpy.data.collections.get(name)
+        if candidate is not None and myo_record.is_muscle_collection(candidate):
+            coll = candidate
+    if coll is None:
         return None, {}
     return coll, myo_record.resolve_objects(coll)
 
@@ -759,11 +763,8 @@ def protect_anchored(obj):
 # Muscle path
 # --------------------------------------------------------------------------
 
-#: Path ends are lifted off the attachment by this fraction of its RMS size.
+#: Inner path points are kept this fraction of the attachment's RMS size clear of the bone.
 PATH_LIFT = 0.25
-#: The second and fourth path points bulge along the attachment normals by
-#: this fraction of the origin-insertion distance.
-PATH_BEND = 0.15
 #: Custom property marking a computed (not user-edited) path.
 AUTO_PATH_KEY = "myo_path_auto"
 
@@ -812,12 +813,16 @@ def write_path(collection, muscle_name, points, auto=False):
 
 
 def default_path_points(props, origin_surface, insertion_surface):
-    """Five path points leaving each attachment along its outward normal, outside the bone.
+    """Five path points on the straight line between the attachments, outside the bone.
 
-    The ends are :func:`attachment_anchor` points (not the centroids, which lie
-    inside the bone for concave or wrapping attachments), lifted by
-    ``PATH_LIFT`` x the attachment size; the 2nd and 4th points bulge along the
-    normals by ``PATH_BEND`` x the origin-insertion distance.
+    The ends (terminal vertices) lie **on** the attachment surfaces, at their
+    :func:`attachment_anchor` points (not the centroids, which lie inside the
+    bone for concave or wrapping attachments), so the path runs attachment to
+    attachment. The three inner points are evenly spaced on the straight line
+    between them, so a muscle starts straight; only points that fall inside a
+    bone are moved out of it, ``PATH_LIFT`` x the attachment size clear
+    (:func:`push_out_of_bones`), so the path bends only where the bone is in
+    the way.
 
     :arg props: Scene settings (``origin_object``, ``insertion_object``).
     :type props: :class:`properties.MyoGeneratorProperties`
@@ -832,11 +837,12 @@ def default_path_points(props, origin_surface, insertion_surface):
     i_point, i_normal, i_size = attachment_anchor(insertion_surface, props.insertion_object,
                                                   area_centroid(origin_surface))
     lift = PATH_LIFT * min(o_size, i_size)
-    start, end = o_point + o_normal * lift, i_point + i_normal * lift
-    distance = (end - start).length
+    start, end = o_point.copy(), i_point.copy()
     pts = [start.lerp(end, k / 4) for k in range(5)]
-    pts[1] = pts[1] + o_normal * distance * PATH_BEND
-    pts[3] = pts[3] + i_normal * distance * PATH_BEND
+    bones = [b for b in {props.origin_object, props.insertion_object} if b is not None and b.type == 'MESH']
+    inner = pts[1:4]
+    push_out_of_bones(inner, bones, lift)
+    pts[1:4] = inner
     return pts
 
 

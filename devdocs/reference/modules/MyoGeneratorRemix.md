@@ -15,10 +15,12 @@ Package layout (see `devdocs/ARCHITECTURE.md`):
 * `volume_builder.py`            - solid belly (tube or fan fibres along the path), live preview, final mesh
 * `fan.py`                       - fibres of fan-shaped muscles
 * `fibre_texture.py`             - muscle texture oriented by the fibre arrangement
+* `modes.py`                     - safe return to Object Mode (also with the edited object hidden)
+* `visibility.py`                - show/hide MyoGen objects by type for every muscle
 * `belly_fibres.py`              - fibres of a finished belly (Laplacian field) for the fibre length
 * `curve_utilities.py`           - path-curve validation, sampling and orientation frames
 * `muscle_utilities.py`          - selection helpers and contour alignment
-* `muscle_texture.py`            - procedural muscle material
+* `muscle_texture.py`            - procedural muscle and ligament materials
 * `muscle_metrics.py`            - measurements, plausibility checks, CSV export
 * `myo_record.py`                - the muscle-record contract shared with MUFIS
 * `myoGenerator_panel.py`        - the sidebar UI

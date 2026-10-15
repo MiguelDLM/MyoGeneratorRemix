@@ -17,7 +17,8 @@ a byte-identical copy (`MUFIS/tools/sync_shared.py` copies and checks it).
         ├── <M>_insertion            myo_role = "insertion"
         ├── <M>_insertion_contour    myo_role = "insertion_contour"
         ├── <M>_curve                myo_role = "path"               (Bezier path)
-        └── <M>_muscle               myo_role = "belly"              (closed mesh)
+        ├── <M>_muscle               myo_role = "belly"              (closed mesh)
+        └── <M>_fibres               myo_role = "fibres"             (optional, see "Fibres")
 ```
 
 `<M>` should end in `_left` / `_right` (or `_l`, `_r`, `.l`, `.r`, `_mid`) for
@@ -35,13 +36,13 @@ Parameters* (`muscle_metrics.compute_muscles`).
 | `myo_schema` | int | schema version (1) |
 | `myo_name` | str | muscle name |
 | `myo_side` | str | `L`, `R`, `M` or empty |
-| `myo_origin_obj`, `myo_insertion_obj`, `myo_path_obj`, `myo_belly_obj` | str | object names (ID properties cannot hold pointers; resolve on read) |
+| `myo_origin_obj`, `myo_insertion_obj`, `myo_path_obj`, `myo_belly_obj`, `myo_fibres_obj` | str | object names (ID properties cannot hold pointers; resolve on read) |
 | `myo_volume_m3` | float | belly volume actually enclosed (see `myo_volume_method`) |
 | `myo_volume_raw_m3` | float | signed-sum volume of the belly mesh (differs from the above only for defective meshes) |
 | `myo_volume_method` | str | `mesh`, `voxel union (defective mesh)` or `winding number (defective mesh)` |
 | `myo_mass_kg` | float | volume × density |
 | `myo_path_length_m` | float | evaluated length of the path curve |
-| `myo_linear_length_m` | float | straight distance between the attachment centroids |
+| `myo_linear_length_m` | float | straight distance between the path's terminal vertices (the attachment centroids when there is no path); centroid to centroid in records written before 3.0-alpha2 |
 | `myo_fiber_length_m` | float | `path_length × fiber_length_ratio`, or with `BELLY_FIBRES` the weighted mean belly fibre length × ratio |
 | `myo_pcsa_m2` | float | `volume × cos(pennation) / fiber_length` |
 | `myo_pcsa_method` | str | human-readable assumptions behind the PCSA |
@@ -64,6 +65,29 @@ A record may be partial (e.g. only `myo_schema`, `myo_name`, `myo_side` right
 after *Submit Muscle*). Readers must treat missing keys as unknown:
 `myo_record.read_record` returns None for them and `has_pcsa` tells whether a
 usable PCSA exists.
+
+## Fibres
+
+Written by *Calculate Muscle Parameters* / *Check Muscles* when *Fibre
+length from* is *Belly fibres* (`belly_fibres.export_fibres`), for
+simulators (MUFIS). `<M>_fibres` is a hidden mesh of `N` polylines with
+`K = myo_fibre_points` points each (vertex `f·K + k` is point `k` of fibre
+`f`; 0 = origin, `K − 1` = insertion; points evenly spaced along the fibre;
+world coordinates in Blender units, identity matrix; consecutive points
+joined by edges). Per-fibre lists (one value per fibre) on the object:
+
+| key | unit | meaning |
+|---|---|---|
+| `myo_fibre_length_m` | m | rest length, attachment to attachment |
+| `myo_fibre_weight` | – | part of the attachment area the fibre represents (sum 1) |
+| `myo_fibre_share` | – | part of the belly volume nearest to it (sum 1) |
+| `myo_fibre_pcsa_area_m2` | m² | muscle PCSA (volume / mean length) × weight; sums to the `MEAN` PCSA |
+| `myo_fibre_pcsa_volume_m2` | m² | `V · share · cos(pennation) / (length · ratio)`; sums to the `WEIGHTED` PCSA |
+
+`myo_fibre_seeding` (str) records how the fibres were seeded: `ORIGIN`,
+`INSERTION`, `BOTH` or `PAIRED` (see `ARCHITECTURE.md`, *Belly fibres*).
+Read them with `myo_record.read_fibres(obj)`; `myo_record.fibre_pcsa`
+computes both lists.
 
 ## Reading a record (any tool)
 

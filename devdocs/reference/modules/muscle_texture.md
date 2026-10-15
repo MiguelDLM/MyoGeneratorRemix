@@ -2,9 +2,10 @@
 
 Source: `muscle_texture.py`
 
-Procedural muscle material applied to the final belly mesh (visual only).
+Procedural muscle and ligament materials (visual only).
 
-Node set-up after Ned Poreyra (https://www.artstation.com/artwork/Rb8LO).
+Muscle node set-up after Ned Poreyra (https://www.artstation.com/artwork/Rb8LO).
+Procedural ligament material for dense collagen connective tissue.
 
 ## Constants
 
@@ -13,6 +14,7 @@ Node set-up after Ned Poreyra (https://www.artstation.com/artwork/Rb8LO).
 | `FIBRE_MATERIAL` | `'Muscle (fibres)'` |
 | `FIBRE_MATERIAL_VERSION` | `3` |
 | `BUMP_MM` | `4.0` |
+| `LIGAMENT_MATERIAL` | `'Ligament'` |
 
 ## Functions
 
@@ -53,5 +55,25 @@ Assign the muscle material to a mesh, creating the material if needed.
 | Parameter | Type | Description |
 |---|---|---|
 | `mesh_obj` | `bpy.types.Object` | Muscle belly. |
+
+**Returns** (bool): True on success.
+
+### `create_ligament_material()`
+
+Create or get the procedural ligament material.
+
+Dense collagen material with subtle longitudinal fibre striations,
+glistening coat and subsurface scattering, suitable for ligaments.
+Returns the material object, creating it only if it doesn't already exist.
+
+**Returns** (`bpy.types.Material`): The ligament material.
+
+### `apply_ligament_material(mesh_obj)`
+
+Assign the ligament material to a mesh, creating the material if needed.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `mesh_obj` | `bpy.types.Object` | Mesh object to assign the ligament material to. |
 
 **Returns** (bool): True on success.

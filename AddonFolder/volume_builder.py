@@ -329,21 +329,29 @@ def manifold_remesh(verts, quads, voxel):
     mesh.polygons.foreach_set("loop_start", np.arange(0, 4 * len(quads), 4, dtype=np.int32))
     mesh.polygons.foreach_set("loop_total", np.full(len(quads), 4, dtype=np.int32))
     mesh.update()
-    mesh.remesh_voxel_size = voxel
-    mesh.use_remesh_fix_poles = False
+    # A Remesh modifier evaluated on a temporary object, not the voxel_remesh
+    # operator: operators called from the live preview's timers pushed undo
+    # steps in an odd context, and Ctrl+Z then crashed Blender.
     obj = bpy.data.objects.new("myo_remesh_tmp", mesh)
-    with bpy.context.temp_override(object=obj, active_object=obj, selected_objects=[obj]):
-        try:
-            bpy.ops.object.voxel_remesh()
-        except RuntimeError:
-            pass                                             # keep the surface-nets mesh
+    bpy.context.scene.collection.objects.link(obj)
     bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    data = obj.data
-    bpy.data.objects.remove(obj, do_unlink=True)
-    for m in {mesh, data}:
-        if m.users == 0:
-            bpy.data.meshes.remove(m)
+    try:
+        mod = obj.modifiers.new("remesh", 'REMESH')
+        mod.mode = 'VOXEL'
+        mod.voxel_size = voxel
+        mod.adaptivity = 0.0
+        mod.use_smooth_shade = False
+        evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        result = evaluated.to_mesh()
+        if result.polygons:
+            bm.from_mesh(result)
+        else:
+            bm.from_mesh(mesh)                               # keep the surface-nets mesh
+        evaluated.to_mesh_clear()
+    finally:
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=voxel * 1e-3)
     loose = [v for v in bm.verts if not v.link_faces]
     bmesh.ops.delete(bm, geom=loose, context='VERTS')
@@ -414,8 +422,11 @@ def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, repo
     :type report: dict
     :arg fibres: ``(courses, radii)`` from :func:`fan.fibres`, or None.
     :type fibres: tuple
-    :arg voxel_scale: Multiplies the voxel size (> 1 = faster draft).
-    :type voxel_scale: float
+    :arg voxel_scale: Multiplies the voxel size (> 1 = faster draft). None =
+       automatic preview: the final voxel unless the final grid exceeds
+       ``FULL_PREVIEW_CELLS``, then ``DRAFT_VOXEL_SCALE`` (``report["draft"]``
+       says which).
+    :type voxel_scale: float or None
     :arg min_radius: Smallest section radius (Blender units): the automatic
        voxel is at most ``min_radius / VOXELS_PER_RADIUS``, so thin muscles
        keep their detail.
@@ -449,9 +460,17 @@ def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, repo
     voxel = props.voxel_size_mm * bu_per_mm if props.voxel_size_mm > 0 else auto
     extent = hi - lo
     budget = (max(extent.x, 1e-9) * max(extent.y, 1e-9) * max(extent.z, 1e-9) / MAX_CELLS) ** (1.0 / 3.0)
-    voxel = max(voxel, size / MAX_VOXELS_ACROSS, budget) * voxel_scale
+    final_voxel = max(voxel, size / MAX_VOXELS_ACROSS, budget)
+    if voxel_scale is None:                                   # automatic preview resolution
+        cells = 1.0
+        for e in extent:
+            cells *= max(e, 1e-9) / final_voxel + 6
+        voxel_scale = DRAFT_VOXEL_SCALE if cells > FULL_PREVIEW_CELLS else 1.0
+    voxel = final_voxel * voxel_scale
+    # Lengths of the shape are set from the final voxel, never the draft one,
+    # so the preview has the final shape (only coarser).
     thickness = (props.attachment_thickness_mm * bu_per_mm if props.attachment_thickness_mm > 0
-                 else AUTO_THICKNESS_VOXELS * voxel)
+                 else AUTO_THICKNESS_VOXELS * final_voxel)
     sigma = props.surface_smoothing_mm * bu_per_mm
     pad = thickness + 3 * voxel + 2 * sigma
     lo -= Vector((pad, pad, pad))
@@ -541,7 +560,7 @@ def build_belly(context, tube_bm, origin_surface, insertion_surface, bones, repo
     bm.verts.index_update()
     weights = [0.0 if v in anchored else 1.0 for v in bm.verts]
     if report is not None:
-        report.update(voxel=voxel, grid=(len(xs), len(ys), len(zs)), seconds=time.time() - started,
+        report.update(voxel=voxel, draft=voxel_scale > 1.0, grid=(len(xs), len(ys), len(zs)), seconds=time.time() - started,
                       anchored=len(anchored), islands_removed=len(islands) - len(keep), pieces=len(keep),
                       stages={b[0]: round(b[1] - a[1], 2) for a, b in zip(stages[:-1], stages[1:])})
     return bm, weights
@@ -553,6 +572,9 @@ PREVIEW_SUFFIX = "_preview"
 TUBE_SUFFIX = "_tube"
 #: Draft voxel factor of the live preview (about 4-6x faster than the final mesh).
 DRAFT_VOXEL_SCALE = 1.8
+#: The live preview uses the final voxel (the exact final shape) unless the
+#: final grid has more cells than this; then it uses ``DRAFT_VOXEL_SCALE``.
+FULL_PREVIEW_CELLS = 1_500_000
 #: Seconds without changes before the live solid preview rebuilds.
 LIVE_DELAY = 0.6
 #: Fibres drawn in the wire of a fan muscle.
@@ -694,8 +716,9 @@ def solid_mesh(context, muscle_name, report=None, voxel_scale=1.0):
     :type muscle_name: str
     :arg report: Optional dict, see :func:`build_belly`.
     :type report: dict
-    :arg voxel_scale: See :func:`build_belly`; > 1 also uses fewer fibres.
-    :type voxel_scale: float
+    :arg voxel_scale: See :func:`build_belly`; > 1 also uses fewer fibres
+       (None, automatic: all of them).
+    :type voxel_scale: float or None
     :return: ``(mesh, weights)``.
     :rtype: tuple
     :raises ValueError: If the muscle or its inputs are missing, or the solid is empty.
@@ -703,7 +726,8 @@ def solid_mesh(context, muscle_name, report=None, voxel_scale=1.0):
     props = context.scene.myogen
     report = {} if report is None else report
     coll, objs, path, points, sections, ring_list = _inputs(context, muscle_name)
-    tube_bm, fibres, min_radius = _body(context, objs, points, sections, voxel_scale > 1.0)
+    tube_bm, fibres, min_radius = _body(context, objs, points, sections,
+                                        voxel_scale is not None and voxel_scale > 1.0)
     try:
         bm, weights = build_belly(context, tube_bm, objs["origin"], objs["insertion"],
                                   (props.origin_object, props.insertion_object), report,
@@ -772,7 +796,9 @@ def _replace_mesh(obj, mesh):
 def update_preview(context, muscle_name, report=None):
     """Create or replace ``<M>_preview``: the solid belly at draft resolution.
 
-    The preview *is* the final shape, only coarser (``DRAFT_VOXEL_SCALE``).
+    The preview *is* the final shape: same voxel, fibres and settings, unless
+    the muscle is large (``FULL_PREVIEW_CELLS``): then it is coarser
+    (``DRAFT_VOXEL_SCALE``) and the status says so.
 
     :arg context: Context.
     :type context: :class:`bpy.types.Context`
@@ -785,7 +811,7 @@ def update_preview(context, muscle_name, report=None):
     :raises ValueError: See :func:`solid_mesh`.
     """
     report = {} if report is None else report
-    mesh, weights = solid_mesh(context, muscle_name, report, DRAFT_VOXEL_SCALE)
+    mesh, weights = solid_mesh(context, muscle_name, report, None)
     coll, _objs = preview.muscle_objects(context, muscle_name)
     name = muscle_name + PREVIEW_SUFFIX
     obj = coll.objects.get(name)
@@ -877,6 +903,8 @@ def describe_report(context, report):
     """
     mm = report.get("voxel", 0.0) * myo_record.metres_per_unit(context.scene) * 1000.0
     text = f"{len(report['object'].data.vertices)} vertices, voxel {mm:.2f} mm, {report.get('seconds', 0):.1f} s"
+    if report.get("draft"):
+        text += " | draft: coarser than the final mesh (large muscle)"
     if report.get("pieces", 1) > 1:
         text += f" | {report['pieces']} separate pieces: widen the rings between them"
     return text
@@ -906,8 +934,17 @@ _pending = False
 _last_state = None
 
 
+#: Relative tolerance of the state comparison: Blender re-composes object
+#: matrices from location / rotation / scale in single precision, so a ring
+#: placed by the add-on reads back a few 1e-6 off.
+STATE_TOLERANCE = 1e-5
+
+
 def _state(context):
-    """Signature of what the belly depends on: path, rings, attachments."""
+    """What the belly depends on: path, rings, attachments (a tuple of numbers).
+
+    Compared with :func:`_changed`, not for equality.
+    """
     props = context.scene.myogen
     coll, objs = preview.muscle_objects(context)
     if coll is None:
@@ -919,15 +956,23 @@ def _state(context):
         sp = path.data.splines[0]
         pts = [tuple(p.co) + tuple(p.handle_left) + tuple(p.handle_right) for p in sp.bezier_points] or \
               [tuple(p.co) for p in sp.points]
-        parts.append(tuple(round(x, 5) for p in pts for x in p))
-        parts.append(tuple(round(x, 5) for row in path.matrix_world for x in row))
+        parts.extend(x for p in pts for x in p)
+        parts.extend(x for row in path.matrix_world for x in row)
     for ring in rings.ring_objects(coll, name):
-        parts.append(tuple(round(x, 5) for row in ring.matrix_world for x in row))
+        parts.extend(x for row in ring.matrix_world for x in row)
     for key in ("origin", "insertion"):
         obj = objs.get(key)
         if obj is not None:
-            parts.append((len(obj.data.vertices),) + tuple(round(x, 5) for row in obj.matrix_world for x in row))
-    return hash(tuple(parts))
+            parts.append(float(len(obj.data.vertices)))
+            parts.extend(x for row in obj.matrix_world for x in row)
+    return tuple(float(x) for x in parts)
+
+
+def _changed(a, b):
+    """True if two :func:`_state` tuples differ beyond ``STATE_TOLERANCE`` (relative)."""
+    if a is None or b is None or len(a) != len(b):
+        return a != b
+    return any(abs(x - y) > STATE_TOLERANCE * max(1.0, abs(x), abs(y)) for x, y in zip(a, b))
 
 
 def _remember_state(context):
@@ -945,6 +990,8 @@ def start_live(context):
     :rtype: :class:`bpy.types.Object`
     :raises ValueError: See :func:`solid_mesh`.
     """
+    from .muscle_texture import create_ligament_material
+    create_ligament_material()
     props = context.scene.myogen
     coll, _objs = preview.muscle_objects(context)
     legacy = coll.objects.get(props.muscle_name + "_rig") if coll else None
@@ -970,6 +1017,21 @@ def stop_live(context):
     for fn in (_live_rebuild, _tube_refresh):
         if bpy.app.timers.is_registered(fn):
             bpy.app.timers.unregister(fn)
+
+
+def discard_preview(context):
+    """Stop the live preview and delete its objects; keep the path and hide the rings.
+
+    :arg context: Context.
+    :type context: :class:`bpy.types.Context`
+    """
+    props = context.scene.myogen
+    stop_live(context)
+    remove_preview(props.muscle_name)
+    coll, _objs = preview.muscle_objects(context)
+    if coll is not None:
+        rings.set_visible(coll, props.muscle_name, False)
+    props.preview_status = ""
 
 
 def _live_rebuild():
@@ -1074,8 +1136,7 @@ def _on_depsgraph_update(scene, depsgraph):
             continue
         obj = update.id.original
         if obj.name in watched or rings.is_ring(obj, name):
-            state = _state(bpy.context)
-            if state != _last_state:
+            if _changed(_state(bpy.context), _last_state):    # not our own update read back
                 _remember_state(bpy.context)
                 schedule_rebuild(bpy.context)
             return

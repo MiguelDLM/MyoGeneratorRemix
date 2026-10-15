@@ -26,6 +26,7 @@ generated in `devdocs/reference/`.
 | volume of defective bellies | `myo_record.mesh_defects`, `robust_volume`, `enclosed_volume`, `winding_volume` |
 | settings | `AddonFolder/properties.py` (`scene.myogen`) |
 | UI | `AddonFolder/myoGenerator_panel.py` |
+| show/hide objects by type for every muscle (Show in Scene panel) | `AddonFolder/visibility.py` |
 
 ## Invariants (do not break)
 

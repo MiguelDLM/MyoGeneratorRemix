@@ -49,14 +49,27 @@ DETOUR_MAX = 2.0
 CONTACT_REACH_VOXELS = 2.0
 #: Points sampled over an attachment to measure the belly's contact.
 CONTACT_SAMPLES = 300
+#: Where fibres start (see :func:`belly_fibres`).
+SEEDINGS = ('ORIGIN', 'INSERTION', 'BOTH', 'PAIRED')
+DEFAULT_SEEDING = 'BOTH'
+#: Points per paired fibre before export.
+PAIRED_SAMPLES = 64
+#: A paired fibre with more than this fraction of its inner points outside the belly is a detour.
+PAIRED_OUTSIDE_MAX = 0.1
 #: Conjugate-gradient tolerance (relative residual) and iteration limit.
 CG_TOL = 1e-6
 CG_MAX_ITER = 4000
 
-#: Name suffix of the fibre display object.
-FIBRES_SUFFIX = "_belly_fibres"
-#: Name suffix of the detoured fibres' display object.
-DETOURS_SUFFIX = "_belly_fibres_detours"
+#: Segments of each exported fibre (Modenese & Kohout 2020 use 15).
+EXPORT_SEGMENTS = 15
+
+#: Name suffix of the detoured fibres (left out of the measurements), written next to ``<M>_fibres``.
+DETOURS_SUFFIX = "_fibre_detours"
+#: Fibre display objects of earlier versions (removed when fibres are exported).
+LEGACY_DISPLAY_SUFFIXES = ("_belly_fibres", "_belly_fibres_detours")
+#: Viewport colours of the exported fibres and of the detours.
+FIBRE_COLOR = (1.0, 0.85, 0.3, 1.0)
+DETOUR_COLOR = (1.0, 0.0, 1.0, 1.0)
 
 _cache = {}
 
@@ -265,8 +278,8 @@ def closed_belly(belly, voxel):
     return out
 
 
-def _signature(belly, origin_obj, insertion_obj, count):
-    parts = [count]
+def _signature(belly, origin_obj, insertion_obj, count, seeding):
+    parts = [count, seeding]
     for obj in (belly, origin_obj, insertion_obj):
         co = np.empty(len(obj.data.vertices) * 3)
         obj.data.vertices.foreach_get("co", co)
@@ -322,6 +335,117 @@ def _trace_from(grid, surface_obj, other_obj, value, count):
     return out, len(points), len(starts)
 
 
+def assignment(cost):
+    """Minimum-cost assignment of every row to a distinct column (Hungarian
+    algorithm with potentials, ``O(n^2 m)``; ``n`` rows <= ``m`` columns).
+
+    :arg cost: Cost matrix, (n, m) with n <= m.
+    :type cost: :class:`numpy.ndarray`
+    :return: Column of each row.
+    :rtype: :class:`numpy.ndarray`
+    :raises ValueError: If there are more rows than columns.
+    """
+    cost = np.asarray(cost, dtype=float)
+    n, m = cost.shape
+    if n > m:
+        raise ValueError("more rows than columns")
+    u = np.zeros(n + 1)
+    v = np.zeros(m + 1)
+    p = np.zeros(m + 1, dtype=int)                              # row matched to each column (1-based, 0 = none)
+    way = np.zeros(m + 1, dtype=int)
+    for i in range(1, n + 1):
+        p[0] = i
+        j0 = 0
+        minv = np.full(m + 1, np.inf)
+        used = np.zeros(m + 1, dtype=bool)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            free = ~used[1:]
+            cur = cost[i0 - 1] - u[i0] - v[1:]
+            better = free & (cur < minv[1:])
+            minv[1:][better] = cur[better]
+            way[1:][better] = j0
+            cand = np.where(free, minv[1:], np.inf)
+            j1 = int(np.argmin(cand)) + 1
+            delta = cand[j1 - 1]
+            cols = np.nonzero(used)[0]
+            u[p[cols]] += delta
+            v[cols] -= delta
+            minv[1:][free] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+    out = np.zeros(n, dtype=int)
+    for j in range(1, m + 1):
+        if p[j]:
+            out[p[j] - 1] = j - 1
+    return out
+
+
+def _field_parameter(course, grid):
+    """Field value along a course (origin to insertion), 0 and 1 at its ends, non-decreasing."""
+    _inside, _fixed, _values, u, _known, _grad, origin, voxel = grid
+    values = np.asarray(_sample(u, origin, voxel, np.asarray(course)), dtype=float)
+    values[0], values[-1] = 0.0, 1.0
+    return np.clip(np.maximum.accumulate(values), 0.0, 1.0)
+
+
+def paired_courses(forward, backward, grid, samples=PAIRED_SAMPLES):
+    """One fibre per pair of seeds, the seeds spread over both attachments.
+
+    ``forward`` (seeded on the origin) and ``backward`` (seeded on the
+    insertion, reversed) streamlines are paired by optimal transport with
+    cost ``|end(f) - insertion seed(b)|^2 + |start(b) - origin seed(f)|^2``:
+    each fibre joins two seeds the field would nearly join, and fibres do
+    not cross. The fibre is the forward streamline near its origin blending
+    smoothly (by field value) into the backward one near its insertion, so it
+    ends exactly on both seeds and follows the belly in between. With unequal
+    counts, the smaller set is paired completely.
+
+    :arg forward: Courses from origin seeds (origin to insertion).
+    :type forward: list of :class:`numpy.ndarray`
+    :arg backward: Courses from insertion seeds, reversed (origin to insertion).
+    :type backward: list of :class:`numpy.ndarray`
+    :arg grid: Field grid (internal).
+    :type grid: tuple
+    :arg samples: Points per fibre.
+    :type samples: int
+    :return: Paired fibres, (samples, 3) each.
+    :rtype: list of :class:`numpy.ndarray`
+    """
+    f_start = np.array([c[0] for c in forward])
+    f_end = np.array([c[-1] for c in forward])
+    b_start = np.array([c[0] for c in backward])                # arrival on the origin
+    b_end = np.array([c[-1] for c in backward])                 # insertion seed
+    cost = (((f_end[:, None, :] - b_end[None, :, :]) ** 2).sum(axis=2)
+            + ((b_start[None, :, :] - f_start[:, None, :]) ** 2).sum(axis=2))
+    if len(forward) <= len(backward):
+        pairs = list(enumerate(assignment(cost)))
+    else:
+        pairs = [(int(a), b) for b, a in enumerate(assignment(cost.T))]
+    t = np.linspace(0.0, 1.0, samples)
+    w = (t * t * (3.0 - 2.0 * t))[:, None]
+
+    def at(course):
+        par = _field_parameter(course, grid)
+        return np.stack([np.interp(t, par, course[:, k]) for k in range(3)], axis=1)
+    return [(1.0 - w) * at(forward[a]) + w * at(backward[b]) for a, b in pairs]
+
+
+def _outside_fraction(course, grid):
+    """Fraction of the inner points of a course outside the belly."""
+    inside, _fixed, _values, _u, _known, _grad, origin, voxel = grid
+    inner = np.asarray(course)[2:-2]
+    if not len(inner):
+        return 0.0
+    return float(np.mean(_sample(inside.astype(float), origin, voxel, inner) < 0.5))
+
+
 def _contact(surface_obj, belly_tree, distance, count=CONTACT_SAMPLES):
     """Fraction of an attachment's area within ``distance`` of the belly."""
     points, _normals = fan.sample_surface(surface_obj, count)
@@ -330,16 +454,24 @@ def _contact(surface_obj, belly_tree, distance, count=CONTACT_SAMPLES):
     return float(np.mean([belly_tree.find_nearest(p)[3] <= distance for p in points]))
 
 
-def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES):
+def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES, seeding=DEFAULT_SEEDING):
     """Fibres of a finished belly between its attachments (Laplacian field).
 
-    Fibres are traced **from both attachments**: ``count`` from points spread
-    over the origin to the insertion, and ``count`` from points spread over
-    the insertion back to the origin (reversed, so every course runs origin
-    to insertion). Streamlines seeded on one side only gather where the field
-    is strongest on the other and leave much of it without fibres; the two
-    sets together cover both attachments, and each set carries half of the
-    weight, so the mean length no longer depends on the side chosen.
+    ``seeding`` (:data:`SEEDINGS`) chooses where fibres start:
+
+    * ``ORIGIN``: ``count`` points spread over the origin, traced to the
+      insertion. They gather where the field is strongest on the insertion
+      and may leave much of it without fibres.
+    * ``INSERTION``: the same from the insertion back to the origin.
+    * ``BOTH`` (default): both sets, each carrying half of the weight: both
+      attachments are covered and the mean length does not depend on the
+      side chosen, but each set bunches up on the other attachment.
+    * ``PAIRED``: one fibre per pair of points, the points spread evenly over
+      both attachments and paired by optimal transport so that each fibre
+      joins where the field would take each of its ends
+      (:func:`paired_courses`); uniform coverage of both, equal weights.
+
+    Every course runs origin to insertion.
 
     Fibres longer than ``DETOUR_MAX`` times the straight distance between
     their ends are **detours** (the field following a thin curved sheet round
@@ -354,8 +486,10 @@ def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES):
     :type origin_obj: :class:`bpy.types.Object`
     :arg insertion_obj: Insertion attachment surface.
     :type insertion_obj: :class:`bpy.types.Object`
-    :arg count: Fibres seeded on each attachment.
+    :arg count: Points seeded on each seeded attachment.
     :type count: int
+    :arg seeding: One of :data:`SEEDINGS`.
+    :type seeding: str
     :return: dict with
 
        * ``courses``: kept fibres, (K, 3) world-space arrays from origin to insertion;
@@ -364,9 +498,10 @@ def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES):
        * ``shares``: fraction of the belly volume nearest to each kept fibre (sum 1);
        * ``detours``: courses of the detoured fibres; ``detoured``: their
          fraction of the arrived fibres;
+       * ``seeding``: the seeding used;
        * ``covered`` / ``covered_insertion``: fraction of the origin /
-         insertion points the belly covers (seeded);
-       * ``reached``: fraction of the seeded fibres that arrived;
+         insertion points the belly covers (seeded), None for a side not seeded;
+       * ``reached``: fraction of the seeded streamlines that arrived;
        * ``origin_contact`` / ``insertion_contact``: fraction of each
          attachment's area the belly touches;
        * ``seeds``, ``voxel`` and ``iterations``.
@@ -374,7 +509,9 @@ def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES):
     :raises ValueError: If the belly does not touch an attachment or no fibre
        arrives.
     """
-    key = _signature(belly, origin_obj, insertion_obj, count)
+    if seeding not in SEEDINGS:
+        raise ValueError(f"unknown seeding '{seeding}'")
+    key = _signature(belly, origin_obj, insertion_obj, count, seeding)
     if key in _cache:
         return _cache[key]
     if not belly.data.vertices:
@@ -424,20 +561,32 @@ def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES):
     grad = np.stack(np.gradient(u_ext, voxel), axis=-1)
     grid = (inside, fixed, values, u_ext, known, grad, origin, voxel)
 
-    forward, n_o, seeded_o = _trace_from(grid, origin_obj, insertion_obj, 0.0, count)
-    backward, n_i, seeded_i = _trace_from(grid, insertion_obj, origin_obj, 1.0, count)
-    if not seeded_o:
+    from_origin = seeding in ('ORIGIN', 'BOTH', 'PAIRED')
+    from_insertion = seeding in ('INSERTION', 'BOTH', 'PAIRED')
+    forward, n_o, seeded_o = (_trace_from(grid, origin_obj, insertion_obj, 0.0, count) if from_origin
+                              else ([], 0, 0))
+    backward, n_i, seeded_i = (_trace_from(grid, insertion_obj, origin_obj, 1.0, count) if from_insertion
+                               else ([], 0, 0))
+    if from_origin and not seeded_o:
         raise ValueError("the belly does not cover the origin attachment")
+    if from_insertion and not seeded_i:
+        raise ValueError("the belly does not cover the insertion attachment")
     if not forward and not backward:
         raise ValueError("no fibre reached the other attachment")
     backward = [c[::-1] for c in backward]                      # origin to insertion
-    sets = [(c, 0.5 / len(forward) if backward else 1.0 / len(forward)) for c in forward] + \
-           [(c, 0.5 / len(backward) if forward else 1.0 / len(backward)) for c in backward]
+    if seeding == 'PAIRED':
+        if not forward or not backward:
+            raise ValueError("no fibre arrived from one of the attachments: cannot pair")
+        sets = [(c, 1.0) for c in paired_courses(forward, backward, grid)]
+    else:
+        sets = [(c, 0.5 / len(forward) if backward else 1.0 / len(forward)) for c in forward] + \
+               [(c, 0.5 / len(backward) if forward else 1.0 / len(backward)) for c in backward]
     kept, weights, detours = [], [], []
     for c, w in sets:
         length = float(np.linalg.norm(np.diff(c, axis=0), axis=1).sum())
         straight = float(np.linalg.norm(c[-1] - c[0]))
-        if length > DETOUR_MAX * max(straight, 1e-12):
+        outside = seeding == 'PAIRED' and _outside_fraction(c, grid) > PAIRED_OUTSIDE_MAX
+        if outside or length > DETOUR_MAX * max(straight, 1e-12):
             detours.append(c)
         else:
             kept.append(c)
@@ -465,10 +614,11 @@ def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES):
         "shares": counts / max(counts.sum(), 1.0),
         "detours": detours,
         "detoured": len(detours) / len(sets),
+        "seeding": seeding,
         "seeds": seeded_o + seeded_i,
-        "covered": seeded_o / max(n_o, 1),
-        "covered_insertion": seeded_i / max(n_i, 1),
-        "reached": len(sets) / max(seeded_o + seeded_i, 1),
+        "covered": seeded_o / max(n_o, 1) if from_origin else None,
+        "covered_insertion": seeded_i / max(n_i, 1) if from_insertion else None,
+        "reached": (len(forward) + len(backward)) / max(seeded_o + seeded_i, 1),
         "origin_contact": _contact(origin_obj, belly_tree, contact),
         "insertion_contact": _contact(insertion_obj, belly_tree, contact),
         "voxel": voxel,
@@ -479,67 +629,47 @@ def belly_fibres(belly, origin_obj, insertion_obj, count=DEFAULT_FIBRES):
     return result
 
 
-def show_fibres(collection, muscle_name, courses, detours=()):
-    """Create (or replace) ``<M>_belly_fibres``: a curve with one poly spline per fibre.
-
-    Detoured fibres, if given, go to ``<M>_belly_fibres_detours`` (magenta).
-
-    :arg collection: Muscle collection.
-    :type collection: :class:`bpy.types.Collection`
-    :arg muscle_name: Muscle name.
-    :type muscle_name: str
-    :arg courses: World-space fibre courses.
-    :type courses: list of :class:`numpy.ndarray`
-    :arg detours: World-space courses of detoured fibres.
-    :type detours: list of :class:`numpy.ndarray`
-    :return: The curve object of the kept fibres.
-    :rtype: :class:`bpy.types.Object`
-    """
-    remove_fibres(collection, muscle_name)
-    obj = _curve_object(collection, muscle_name + FIBRES_SUFFIX, courses, (1.0, 0.85, 0.3, 1.0))
-    if len(detours):
-        _curve_object(collection, muscle_name + DETOURS_SUFFIX, detours, (1.0, 0.0, 1.0, 1.0))
-    return obj
-
-
-def _curve_object(collection, name, courses, color):
+def _polyline_mesh(collection, name, courses, color):
+    """Create a hidden mesh of polylines (one edge chain per course), replacing ``name``."""
     import bpy
-    curve = bpy.data.curves.new(name, type='CURVE')
-    curve.dimensions = '3D'
+    old = collection.objects.get(name)
+    if old is not None:
+        data = old.data
+        bpy.data.objects.remove(old, do_unlink=True)
+        if data is not None and data.users == 0:
+            bpy.data.meshes.remove(data)
+    verts, edges = [], []
     for c in courses:
-        spline = curve.splines.new('POLY')
-        spline.points.add(len(c) - 1)
-        for p, q in zip(spline.points, c.tolist()):
-            p.co = (q[0], q[1], q[2], 1.0)
-    obj = bpy.data.objects.new(name, curve)
-    obj.show_in_front = True
-    obj.color = color
+        base = len(verts)
+        verts.extend(map(tuple, np.asarray(c).tolist()))
+        edges.extend((base + k, base + k + 1) for k in range(len(c) - 1))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, edges, [])
+    obj = bpy.data.objects.new(name, mesh)
     collection.objects.link(obj)
+    obj.color = color
+    obj.show_in_front = True
+    obj.hide_viewport = True
+    obj.hide_render = True
     return obj
 
 
-def remove_fibres(collection, muscle_name):
-    """Delete ``<M>_belly_fibres`` (and its detours) if present.
+def remove_legacy_display(collection, muscle_name):
+    """Delete the fibre curves made by the former *Show Belly Fibres* operator.
 
     :arg collection: Muscle collection.
     :type collection: :class:`bpy.types.Collection`
     :arg muscle_name: Muscle name.
     :type muscle_name: str
-    :return: True if something was removed.
-    :rtype: bool
     """
     import bpy
-    removed = False
-    for name in (muscle_name + FIBRES_SUFFIX, muscle_name + DETOURS_SUFFIX):
-        obj = collection.objects.get(name)
-        if obj is None:
-            continue
-        curve = obj.data
-        bpy.data.objects.remove(obj, do_unlink=True)
-        if curve.users == 0:
-            bpy.data.curves.remove(curve)
-        removed = True
-    return removed
+    for suffix in LEGACY_DISPLAY_SUFFIXES:
+        obj = collection.objects.get(muscle_name + suffix)
+        if obj is not None:
+            data = obj.data
+            bpy.data.objects.remove(obj, do_unlink=True)
+            if data is not None and data.users == 0 and isinstance(data, bpy.types.Curve):
+                bpy.data.curves.remove(data)
 
 
 def length_stats(lengths, weights=None):
@@ -561,3 +691,73 @@ def length_stats(lengths, weights=None):
         "min": float(lengths.min()),
         "max": float(lengths.max()),
     }
+
+
+def resample(course, segments=EXPORT_SEGMENTS):
+    """A polyline resampled to ``segments + 1`` points evenly spaced along it.
+
+    :arg course: Polyline, (K, 3).
+    :type course: :class:`numpy.ndarray`
+    :arg segments: Number of segments.
+    :type segments: int
+    :rtype: :class:`numpy.ndarray`
+    """
+    course = np.asarray(course, dtype=float)
+    cum = np.concatenate(([0.0], np.cumsum(np.linalg.norm(np.diff(course, axis=0), axis=1))))
+    if cum[-1] <= 0.0:
+        return np.repeat(course[:1], segments + 1, axis=0)
+    t = np.linspace(0.0, cum[-1], segments + 1)
+    return np.stack([np.interp(t, cum, course[:, i]) for i in range(3)], axis=1)
+
+
+def export_fibres(collection, muscle_name, fibres, volume_m3, metres_per_unit, fiber_length_ratio,
+                  pennation_deg, segments=EXPORT_SEGMENTS):
+    """Write the fibres of a belly for simulators (``<M>_fibres``, :func:`myo_record.write_fibres`).
+
+    Each kept fibre is resampled to ``segments`` segments; its rest length,
+    area weight, volume share and PCSA by both sharing rules
+    (:func:`myo_record.fibre_pcsa`) are stored with it.
+
+    :arg collection: Muscle collection.
+    :type collection: :class:`bpy.types.Collection`
+    :arg muscle_name: Muscle name.
+    :type muscle_name: str
+    :arg fibres: Result of :func:`belly_fibres`.
+    :type fibres: dict
+    :arg volume_m3: Belly volume (m³).
+    :type volume_m3: float
+    :arg metres_per_unit: Metres per Blender unit.
+    :type metres_per_unit: float
+    :arg fiber_length_ratio: Fascicle / fibre-line length.
+    :type fiber_length_ratio: float
+    :arg pennation_deg: Pennation angle (degrees).
+    :type pennation_deg: float
+    :arg segments: Segments per fibre.
+    :type segments: int
+    :return: The fibres object.
+    :rtype: :class:`bpy.types.Object`
+    """
+    from . import myo_record
+    lengths_m = [float(x) * metres_per_unit for x in fibres["lengths"]]
+    by_area, by_volume = myo_record.fibre_pcsa(volume_m3, lengths_m, fibres["weights"], fibres["shares"],
+                                               fiber_length_ratio, pennation_deg)
+    remove_legacy_display(collection, muscle_name)
+    if len(fibres["detours"]):
+        _polyline_mesh(collection, muscle_name + DETOURS_SUFFIX, fibres["detours"], DETOUR_COLOR)
+    else:
+        old = collection.objects.get(muscle_name + DETOURS_SUFFIX)
+        if old is not None:
+            import bpy
+            bpy.data.objects.remove(old, do_unlink=True)
+    obj = myo_record.write_fibres(
+        collection, muscle_name + myo_record.ROLES["fibres"],
+        [resample(c, segments).tolist() for c in fibres["courses"]],
+        {"myo_fibre_length_m": lengths_m,
+         "myo_fibre_weight": list(map(float, fibres["weights"])),
+         "myo_fibre_share": list(map(float, fibres["shares"])),
+         "myo_fibre_pcsa_area_m2": by_area,
+         "myo_fibre_pcsa_volume_m2": by_volume},
+        seeding=fibres.get("seeding", ""))
+    obj.color = FIBRE_COLOR
+    obj.show_in_front = True
+    return obj

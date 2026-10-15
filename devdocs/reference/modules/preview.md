@@ -33,7 +33,6 @@ acts away from the ends (`anchor_weight`). The final belly keeps
 | `_RAYS` | `(_RAY, Vector((-0.83, 0.21, 0.52)).normalized(), Vector((0.17, -0.94, 0.29)).normalized...` |
 | `DIAGNOSIS_CONTACT_MM` | `0.05` |
 | `PATH_LIFT` | `0.25` |
-| `PATH_BEND` | `0.15` |
 | `AUTO_PATH_KEY` | `'myo_path_auto'` |
 
 ## Functions
@@ -345,12 +344,16 @@ Create or replace `<M>_curve`: a Bezier through `points` (AUTO handles, radius 1
 
 ### `default_path_points(props, origin_surface, insertion_surface)`
 
-Five path points leaving each attachment along its outward normal, outside the bone.
+Five path points on the straight line between the attachments, outside the bone.
 
-The ends are `attachment_anchor` points (not the centroids, which lie
-inside the bone for concave or wrapping attachments), lifted by
-`PATH_LIFT` x the attachment size; the 2nd and 4th points bulge along the
-normals by `PATH_BEND` x the origin-insertion distance.
+The ends (terminal vertices) lie **on** the attachment surfaces, at their
+`attachment_anchor` points (not the centroids, which lie inside the
+bone for concave or wrapping attachments), so the path runs attachment to
+attachment. The three inner points are evenly spaced on the straight line
+between them, so a muscle starts straight; only points that fall inside a
+bone are moved out of it, `PATH_LIFT` x the attachment size clear
+(`push_out_of_bones`), so the path bends only where the bone is in
+the way.
 
 | Parameter | Type | Description |
 |---|---|---|

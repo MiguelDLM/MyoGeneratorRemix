@@ -53,6 +53,12 @@ class Formulas(unittest.TestCase):
         self.assertAlmostEqual(fiber, 0.05)
         self.assertAlmostEqual(pcsa, 1e-4 * 0.5 / 0.05)
         self.assertEqual(mr.pcsa_from_fibres(1e-4, [], [])[0], 0.0)
+        # per-fibre PCSA: by area sums to the MEAN PCSA, by volume to the WEIGHTED one
+        area, vol = mr.fibre_pcsa(1e-4, [0.05, 0.15], [1.0, 1.0], [0.5, 0.5])
+        self.assertAlmostEqual(sum(area), mr.pcsa_from_fibres(1e-4, [0.05, 0.15], [0.5, 0.5])[0])
+        self.assertAlmostEqual(sum(vol), mr.pcsa_from_fibres(1e-4, [0.05, 0.15], [0.5, 0.5], model="WEIGHTED")[0])
+        self.assertAlmostEqual(area[0], area[1])
+        self.assertAlmostEqual(vol[0], 3 * vol[1])
         # weights: mean length weighted
         pcsa, fiber = mr.pcsa_from_fibres(1e-4, [0.1, 0.2], [0.5, 0.5], weights=[3.0, 1.0])
         self.assertAlmostEqual(fiber, 0.125)
@@ -108,6 +114,23 @@ class Checks(unittest.TestCase):
         out = mr.check_bilateral({"m_left": 1.0, "m_right": 2.0, "x_left": 1.0, "x_right": 1.1})
         self.assertIn("m_left", out)
         self.assertNotIn("x_left", out)
+
+    def test_path_ends(self):
+        self.assertEqual(mr.check_path_ends(0.0, 0.001, 0.05), [])
+        found = mr.check_path_ends(0.01, 0.0, 0.05)                      # 1 cm off on a 5 cm path
+        self.assertEqual(len(found), 1)
+        self.assertIn("origin area", found[0][1])
+        self.assertEqual(mr.check_path_ends(1.0, 1.0, 0.0), [])
+
+    def test_overlaps(self):
+        vols = {"a": 10e-6, "b": 5e-6, "c": 8e-6}
+        out = mr.check_overlaps({("a", "b"): 1e-6, ("a", "c"): 0.05e-6, ("b", "c"): 0.0001e-6}, vols)
+        self.assertEqual(out["b"][0][0], mr.QA_WARNING)                  # 20% of the smaller muscle
+        self.assertIn("'a'", out["b"][0][1])
+        self.assertEqual([lvl for lvl, _ in out["c"]], [mr.QA_INFO])     # 0.6%: minor interpenetration
+        self.assertEqual(len(out["a"]), 2)
+        self.assertEqual(len(out["b"]), 1)                               # 0.002%: contact, not reported
+        self.assertEqual(mr.check_overlaps({}, vols), {})
 
     def test_worst_level(self):
         self.assertEqual(mr.worst_level([(mr.QA_INFO, ""), (mr.QA_ERROR, ""), (mr.QA_WARNING, "")]),

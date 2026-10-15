@@ -29,4 +29,4 @@ curve, role `<mesh_name>_contour`) inside `muscles/<M>`, where `M` is
 
 ## Blender classes
 
-Operators, property groups and panels of this module are listed in [operators](../operators.md) and [properties](../properties.md): `Muscle_Name_Submition`, `Estimate_Selected_Volumes_Op`, `MYOGENERATOR_OT_mirror_duplicate`, `Select_Origin_Op`, `Select_Insertion_Op`, `Submit_Origin_Op`, `Submit_Insertion_Op`, `Next_Muscle_Op`, `Check_Muscles_Op`, `Show_Belly_Fibres_Op`, `Set_Unit_Scale_Op`, `Calculate_Muscle_Parameters_Op`.
+Operators, property groups and panels of this module are listed in [operators](../operators.md) and [properties](../properties.md): `Muscle_Name_Submition`, `Estimate_Selected_Volumes_Op`, `MYOGENERATOR_OT_mirror_duplicate`, `Select_Origin_Op`, `Select_Insertion_Op`, `Submit_Origin_Op`, `Submit_Insertion_Op`, `Next_Muscle_Op`, `Create_Ligament_Material_Op`, `Recall_Attachment_Faces_Op`, `Rename_Muscle_Op`, `Delete_Muscle_Op`, `Select_Muscle_Op`, `Select_Muscle_Menu_Op`, `Check_Muscles_Op`, `Trace_Fibres_Op`, `Set_Unit_Scale_Op`, `Calculate_Muscle_Parameters_Op`.

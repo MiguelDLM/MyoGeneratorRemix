@@ -93,6 +93,28 @@ Section of the fan's fibre bundle along the muscle: centre, widest direction, ha
 
 **Returns** (tuple of `numpy.ndarray`): `(us, centres, axes, half_widths)` per fibre sample along the muscle (u from 0 to 1): the fibres' centre, their widest direction (sign kept consistent) and half-width (world units).
 
+### `fibre_coordinates_from_streamlines(vertices, streamlines, arrangement, pennation_deg=DEFAULT_PENNATION, bundles=None, edges=None)`
+
+Fibre texture coordinates of points of a belly interpolated from streamline courses.
+
+Used when belly fibres have been simulated (`belly_fibres`) or generated
+from the fan model (`fan.fibres`). Each streamline is a single fibre
+fascicle whose phase (across-width position) is constant along its entire length,
+preventing transverse ripples and ensuring striations run smoothly from origin
+to insertion. Streamlines are smoothed and interpolated with a Gaussian kernel
+and graph Laplacian smoothing across mesh edges to eliminate polygonal faceting.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `vertices` | `numpy.ndarray` | World-space vertex positions, (N, 3). |
+| `streamlines` | sequence of sequences of 3 floats | Streamline polylines, (M, K, 3) or sequence of polylines. |
+| `arrangement` | str | One of `ARRANGEMENTS`. |
+| `pennation_deg` | float | Angle between fibres and tendon (pennate arrangements). |
+| `bundles` | float | Fibre bundles across the muscle's width drawn by the material (default `DEFAULT_BUNDLES`). |
+| `edges` | `numpy.ndarray` or None | Mesh edge vertex index pairs (E, 2) used for surface Laplacian smoothing (optional). |
+
+**Returns** (tuple of (`numpy.ndarray`, `numpy.ndarray`, float)): `(coords, u, mean_length)`: (N, 3) `(along, phase, depth)`, (N,) position along the fibres (0-1), and mean streamline length (world units).
+
 ### `bundle_size(vertices, coords)`
 
 World size of one unit of the fibre coordinates (Blender units per unit).

@@ -72,6 +72,9 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
         name="Muscle Name", default="Insert muscle name",
         description="Name of the muscle being reconstructed. Use a _left/_right suffix "
                     "for bilateral muscles (e.g. temp_sup_left)")
+    active_muscle: bpy.props.StringProperty(
+        name="Active Muscle", default="",
+        description="Name of the muscle collection currently active or selected for editing")
 
     muscle_curve_subdivisions: bpy.props.IntProperty(
         name="Curve Subdivisions", default=12, min=4, max=100, update=on_setting_changed,
@@ -220,9 +223,23 @@ class MyoGeneratorProperties(bpy.types.PropertyGroup):
                 "count more, as in a fan-shaped muscle")],
         default='MEAN',
         description="How the belly fibres give the PCSA")
+    fibre_seeding: bpy.props.EnumProperty(
+        name="Seeding",
+        items=[('BOTH', "Both attachments",
+                "Fibres from points spread over the origin and from points spread over the insertion, half "
+                "of the weight each: both attachments covered, mean length independent of the side"),
+               ('PAIRED', "Paired (uniform)",
+                "One fibre per pair of points spread evenly over both attachments, paired by optimal "
+                "transport along the field: uniform coverage of both, equal weights"),
+               ('ORIGIN', "Origin only",
+                "Fibres from points spread over the origin; they may bunch up on part of the insertion"),
+               ('INSERTION', "Insertion only",
+                "Fibres from points spread over the insertion; they may bunch up on part of the origin")],
+        default='BOTH',
+        description="Where the belly fibres start")
     belly_fibre_count: bpy.props.IntProperty(
         name="Fibres", default=150, min=20, max=1000,
-        description="Number of belly fibres, spread evenly over the origin attachment")
+        description="Number of points spread evenly over each seeded attachment")
     pennation_deg: bpy.props.FloatProperty(
         name="Pennation Angle (°)", default=myo_record.DEFAULT_PENNATION_DEG,
         min=0.0, max=60.0, precision=1,

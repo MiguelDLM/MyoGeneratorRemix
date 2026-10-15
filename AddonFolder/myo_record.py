@@ -44,6 +44,7 @@ ROLES = {
     "insertion_contour": "_insertion_contour",
     "path": "_curve",
     "belly": "_muscle",
+    "fibres": "_fibres",
 }
 
 # record key -> role whose object name it stores
@@ -52,11 +53,12 @@ OBJECT_KEYS = {
     "myo_insertion_obj": "insertion",
     "myo_path_obj": "path",
     "myo_belly_obj": "belly",
+    "myo_fibres_obj": "fibres",
 }
 
 RECORD_KEYS = (
     "myo_schema", "myo_name", "myo_side",
-    "myo_origin_obj", "myo_insertion_obj", "myo_path_obj", "myo_belly_obj",
+    "myo_origin_obj", "myo_insertion_obj", "myo_path_obj", "myo_belly_obj", "myo_fibres_obj",
     "myo_volume_m3", "myo_volume_raw_m3", "myo_volume_method", "myo_mass_kg",
     "myo_path_length_m", "myo_linear_length_m", "myo_fiber_length_m",
     "myo_pcsa_m2", "myo_pcsa_method",
@@ -194,6 +196,46 @@ def pcsa_from_fibres(volume_m3, lengths_m, shares, fiber_length_ratio=DEFAULT_FI
     return volume_m3 * cos / mean, mean
 
 
+def fibre_pcsa(volume_m3, lengths_m, weights, shares, fiber_length_ratio=DEFAULT_FIBER_LENGTH_RATIO,
+               pennation_deg=DEFAULT_PENNATION_DEG):
+    """PCSA of every fibre of a belly, by the two sharing rules.
+
+    * **By area** (option A): the muscle's PCSA from the mean fibre length
+      (:func:`pcsa_from_fibres`, ``MEAN``) shared in proportion to ``weights``
+      (each fibre's part of the attachment area it was seeded on).
+    * **By volume** (option B): ``V_i cos(theta) / (L_i x ratio)`` with
+      ``V_i = V x share_i``, the fibre's own part of the volume over its own
+      length (Woodley & Mercer 2005); the sum is the ``WEIGHTED`` PCSA.
+
+    :arg volume_m3: Muscle volume (m³).
+    :type volume_m3: float
+    :arg lengths_m: Fibre lengths at rest (m), attachment to attachment.
+    :type lengths_m: sequence of float
+    :arg weights: Area weight of each fibre (any positive scale).
+    :type weights: sequence of float
+    :arg shares: Volume share of each fibre (any positive scale).
+    :type shares: sequence of float
+    :arg fiber_length_ratio: Fascicle / fibre-line length.
+    :type fiber_length_ratio: float
+    :arg pennation_deg: Pennation angle (degrees).
+    :type pennation_deg: float
+    :return: ``(by_area_m2, by_volume_m2)``, one value per fibre each.
+    :rtype: tuple of list
+    """
+    lengths = [float(x) for x in lengths_m]
+    if not lengths:
+        return [], []
+    total, _lf = pcsa_from_fibres(volume_m3, lengths, shares, fiber_length_ratio, pennation_deg, "MEAN",
+                                  weights=weights)
+    w_sum = sum(weights) or 1.0
+    s_sum = sum(shares) or 1.0
+    cos = math.cos(math.radians(pennation_deg))
+    by_area = [total * w / w_sum for w in weights]
+    by_volume = [volume_m3 * cos * s / s_sum / (x * fiber_length_ratio) if x > 0.0 else 0.0
+                 for s, x in zip(shares, lengths)]
+    return by_area, by_volume
+
+
 def pcsa_method_label(fiber_length_ratio, pennation_deg, source="PATH", model="MEAN"):
     """Human-readable description of the PCSA assumptions, stored in ``myo_pcsa_method``.
 
@@ -253,6 +295,25 @@ def curve_length(curve_obj, resolution=32):
             pts = [mw @ Vector(p.co[:3]) for p in spline.points]
             total += sum((pts[i] - pts[i - 1]).length for i in range(1, len(pts)))
     return total
+
+
+def curve_ends(curve_obj):
+    """World positions of the first and last points of a curve's first spline.
+
+    :arg curve_obj: Curve object (Bezier or poly/NURBS spline).
+    :type curve_obj: :class:`bpy.types.Object`
+    :return: ``(start, end)`` or None if the curve has no points.
+    :rtype: tuple of :class:`mathutils.Vector` or None
+    """
+    if curve_obj is None or curve_obj.type != 'CURVE' or not curve_obj.data.splines:
+        return None
+    spline = curve_obj.data.splines[0]
+    pts = ([bp.co for bp in spline.bezier_points] if spline.type == 'BEZIER'
+           else [Vector(p.co[:3]) for p in spline.points])
+    if not pts:
+        return None
+    mw = curve_obj.matrix_world
+    return mw @ pts[0], mw @ pts[-1]
 
 
 def mesh_stats(obj):
@@ -561,13 +622,24 @@ def is_muscle_collection(coll):
 def iter_muscle_collections():
     """All MyoGen muscle collections of the file.
 
-    :return: Muscle collections (children of the root); empty if there is no root.
+    :return: Muscle collections (children of the root, or collections with a muscle record elsewhere).
     :rtype: list of :class:`bpy.types.Collection`
     """
-    root = get_root()
-    if root is None:
+    if bpy is None:
         return []
-    return [c for c in root.children if is_muscle_collection(c)]
+    found = []
+    seen = set()
+    root = get_root()
+    if root:
+        for c in root.children:
+            if is_muscle_collection(c):
+                found.append(c)
+                seen.add(c.name)
+    for c in bpy.data.collections:
+        if c.name not in seen and is_muscle_collection(c):
+            found.append(c)
+            seen.add(c.name)
+    return found
 
 
 def tag_roles(coll):
@@ -637,6 +709,96 @@ def read_record(coll):
 
 
 # --------------------------------------------------------------------------
+# Fibres (curved polylines through the belly, for simulators)
+# --------------------------------------------------------------------------
+
+#: Custom properties of the fibres object: points per fibre, and per-fibre
+#: lists (one value per fibre, origin-to-insertion order of the polylines).
+FIBRE_POINTS_KEY = "myo_fibre_points"
+#: Custom property of the fibres object: how the fibres were seeded
+#: (``ORIGIN``, ``INSERTION``, ``BOTH`` or ``PAIRED``; empty if unknown).
+FIBRE_SEEDING_KEY = "myo_fibre_seeding"
+FIBRE_LIST_KEYS = ("myo_fibre_length_m", "myo_fibre_weight", "myo_fibre_share",
+                   "myo_fibre_pcsa_area_m2", "myo_fibre_pcsa_volume_m2")
+
+
+def write_fibres(coll, name, polylines, values, seeding=""):
+    """Create or replace the fibres object of a muscle.
+
+    A mesh of ``N`` polylines with ``K`` points each, vertex ``f * K + k`` being
+    point ``k`` (0 = origin, ``K - 1`` = insertion) of fibre ``f``, consecutive
+    points joined by edges; world-space coordinates (Blender units), identity
+    matrix. Per-fibre values are custom properties (:data:`FIBRE_LIST_KEYS`).
+    The object gets ``myo_role = "fibres"`` and is hidden in the viewport.
+
+    :arg coll: The muscle collection.
+    :type coll: :class:`bpy.types.Collection`
+    :arg name: Object name (``<M>_fibres``).
+    :type name: str
+    :arg polylines: ``N`` polylines of ``K`` world-space points each.
+    :type polylines: sequence of sequences of 3 floats
+    :arg values: Key of :data:`FIBRE_LIST_KEYS` -> list of ``N`` values.
+    :type values: dict
+    :arg seeding: How the fibres were seeded (stored as :data:`FIBRE_SEEDING_KEY`).
+    :type seeding: str
+    :return: The fibres object.
+    :rtype: :class:`bpy.types.Object`
+    :raises ValueError: If the polylines differ in length or a list has the wrong size.
+    """
+    polylines = [[tuple(map(float, p)) for p in line] for line in polylines]
+    k = len(polylines[0]) if polylines else 0
+    if k < 2 or any(len(line) != k for line in polylines):
+        raise ValueError("fibres need two or more points each, the same number for all")
+    for key, data in values.items():
+        if key not in FIBRE_LIST_KEYS or len(data) != len(polylines):
+            raise ValueError(f"bad fibre values for '{key}'")
+    old = coll.objects.get(name)
+    if old is not None:
+        mesh = old.data
+        bpy.data.objects.remove(old, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    for obj in [o for o in coll.objects if o.get(ROLE_KEY) == "fibres"]:
+        bpy.data.objects.remove(obj, do_unlink=True)
+    mesh = bpy.data.meshes.new(name)
+    verts = [p for line in polylines for p in line]
+    edges = [(f * k + j, f * k + j + 1) for f in range(len(polylines)) for j in range(k - 1)]
+    mesh.from_pydata(verts, edges, [])
+    obj = bpy.data.objects.new(name, mesh)
+    coll.objects.link(obj)
+    obj[ROLE_KEY] = "fibres"
+    obj[FIBRE_POINTS_KEY] = k
+    obj[FIBRE_SEEDING_KEY] = str(seeding)
+    for key, data in values.items():
+        obj[key] = [float(x) for x in data]
+    obj.hide_viewport = True
+    obj.hide_render = True
+    return obj
+
+
+def read_fibres(obj):
+    """Polylines and per-fibre values of a fibres object (:func:`write_fibres`).
+
+    :arg obj: Fibres object.
+    :type obj: :class:`bpy.types.Object`
+    :return: ``(polylines, values)``: list of ``N`` lists of ``K`` world-space
+       :class:`mathutils.Vector` (Blender units), and key -> list of ``N`` floats
+       for the keys present.
+    :rtype: tuple
+    :raises ValueError: If the object is not a fibres mesh.
+    """
+    k = int(obj.get(FIBRE_POINTS_KEY) or 0)
+    if obj.type != 'MESH' or k < 2 or len(obj.data.vertices) % k:
+        raise ValueError(f"'{obj.name}' is not a fibres object")
+    mw = obj.matrix_world
+    pts = [mw @ v.co for v in obj.data.vertices]
+    polylines = [pts[i:i + k] for i in range(0, len(pts), k)]
+    values = {key: [float(x) for x in obj[key]] for key in FIBRE_LIST_KEYS
+              if key in obj and len(obj[key]) == len(polylines)}
+    return polylines, values
+
+
+# --------------------------------------------------------------------------
 # Plausibility checks (dimensionless, so they hold from a shrew to a T. rex)
 # --------------------------------------------------------------------------
 
@@ -644,9 +806,12 @@ REF_LENGTH_RANGE_M = (0.003, 6.0)        # skull / jaw longest dimension
 FIBER_TO_REF = (0.03, 1.2)
 CBRT_VOLUME_TO_REF = (0.01, 0.6)
 PATH_TO_LINEAR = (0.9, 1.8)          # tolerant: path ends are often edited by hand
+PATH_END_TO_PATH = 0.1               # path end farther than this x path length from its attachment
 BILATERAL_VOLUME_RATIO = 1.5
 HOLE_VOLUME_TOLERANCE = 0.02            # relative volume change
 OVERLAP_VOLUME_TOLERANCE = 0.02         # raw vs enclosed volume
+MUSCLE_OVERLAP_WARNING = 0.02           # shared volume / smaller muscle: two muscles in one place
+MUSCLE_OVERLAP_INFO = 0.002             # below: contact (sculpted against each other), not reported
 DENSITY_RANGE = (1.0, 1.1)               # g/cm3
 SPECIFIC_TENSION_RANGE = (10.0, 60.0)    # N/cm2
 FIBER_RATIO_RANGE = (0.3, 1.0)
@@ -800,6 +965,59 @@ def check_bilateral(volumes_by_name):
                 msg = (QA_WARNING, f"Left/right volumes of '{base}' differ {max(lv, rv) / min(lv, rv):.2f}x")
                 out.setdefault(ln, []).append(msg)
                 out.setdefault(rn, []).append(msg)
+    return out
+
+
+def check_path_ends(origin_gap_m, insertion_gap_m, path_length_m):
+    """Findings for path ends that do not lie on their attachment areas.
+
+    :arg origin_gap_m: Distance from the path's first point to the origin surface (m).
+    :type origin_gap_m: float
+    :arg insertion_gap_m: Distance from its last point to the insertion surface (m).
+    :type insertion_gap_m: float
+    :arg path_length_m: Path length (m).
+    :type path_length_m: float
+    :return: WARNING per end farther than :data:`PATH_END_TO_PATH` x the path length.
+    :rtype: list of tuple
+    """
+    findings = []
+    if path_length_m <= 0.0:
+        return findings
+    for role, gap in (("origin", origin_gap_m), ("insertion", insertion_gap_m)):
+        if gap is not None and gap > PATH_END_TO_PATH * path_length_m:
+            findings.append((QA_WARNING, f"Path does not end on the {role} area ({_fmt_len(gap)} away): "
+                                         "path and straight lengths miss that stretch; move its end point "
+                                         "onto the area or Reset Path"))
+    return findings
+
+
+def check_overlaps(shared_by_pair, volumes_by_name):
+    """Findings for muscles that occupy the same space (anatomically impossible).
+
+    :arg shared_by_pair: ``(name_a, name_b)`` -> volume inside both bellies (m³).
+    :type shared_by_pair: dict
+    :arg volumes_by_name: Collection name -> belly volume (m³).
+    :type volumes_by_name: dict
+    :return: Collection name -> findings: WARNING when the shared volume is at
+       least :data:`MUSCLE_OVERLAP_WARNING` of the smaller muscle, INFO from
+       :data:`MUSCLE_OVERLAP_INFO` (minor interpenetration); nothing below.
+    :rtype: dict
+    """
+    out = {}
+    for (a, b), shared in shared_by_pair.items():
+        smaller = min(volumes_by_name.get(a) or 0.0, volumes_by_name.get(b) or 0.0)
+        if smaller <= 0.0 or shared <= 0.0:
+            continue
+        fraction = shared / smaller
+        if fraction < MUSCLE_OVERLAP_INFO:
+            continue
+        level = QA_WARNING if fraction >= MUSCLE_OVERLAP_WARNING else QA_INFO
+        for this, other in ((a, b), (b, a)):
+            text = (f"Overlaps '{other}': {shared * 1e6:.3g} cm3 shared ({fraction * 100:.1f}% of the smaller "
+                    "muscle)")
+            if level == QA_WARNING:
+                text += "; two muscles cannot occupy the same space: reshape one of them"
+            out.setdefault(this, []).append((level, text))
     return out
 
 

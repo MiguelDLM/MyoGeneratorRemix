@@ -1,6 +1,7 @@
-"""Procedural muscle material applied to the final belly mesh (visual only).
+"""Procedural muscle and ligament materials (visual only).
 
-Node set-up after Ned Poreyra (https://www.artstation.com/artwork/Rb8LO).
+Muscle node set-up after Ned Poreyra (https://www.artstation.com/artwork/Rb8LO).
+Procedural ligament material for dense collagen connective tissue.
 """
 import bpy
 
@@ -523,4 +524,199 @@ def apply_muscle_material(mesh_obj):
     mesh_obj.data.materials.append(muscle_material)
     
     return True
+
+
+#: Name of the procedural ligament material.
+LIGAMENT_MATERIAL = "Ligament"
+
+
+def create_ligament_material():
+    """Create or get the procedural ligament material.
+
+    Dense collagen material with subtle longitudinal fibre striations,
+    glistening coat and subsurface scattering, suitable for ligaments.
+    Returns the material object, creating it only if it doesn't already exist.
+
+    :return: The ligament material.
+    :rtype: :class:`bpy.types.Material`
+    """
+    existing_material = bpy.data.materials.get(LIGAMENT_MATERIAL)
+    if existing_material:
+        return existing_material
+
+    mat = bpy.data.materials.new(name=LIGAMENT_MATERIAL)
+    mat.use_fake_user = True
+    mat.use_nodes = True
+    return _build_ligament_node_tree(mat)
+
+
+def _build_ligament_node_tree(mat):
+    """Build the procedural ligament material node tree."""
+    tree = mat.node_tree
+    for node in list(tree.nodes):
+        tree.nodes.remove(node)
+
+    # Principled BSDF
+    principled = tree.nodes.new("ShaderNodeBsdfPrincipled")
+    principled.name = "Principled BSDF"
+    principled.location = (180.0, 300.0)
+    principled.width = 240.0
+
+    principled.inputs["Roughness"].default_value = 0.35
+    principled.inputs["IOR"].default_value = 1.45
+
+    if "Subsurface Weight" in principled.inputs:
+        principled.inputs["Subsurface Weight"].default_value = 0.3
+    elif "Subsurface" in principled.inputs:
+        principled.inputs["Subsurface"].default_value = 0.3
+
+    if "Subsurface Radius" in principled.inputs:
+        principled.inputs["Subsurface Radius"].default_value = (0.35, 0.25, 0.18)
+
+    if "Subsurface Scale" in principled.inputs:
+        principled.inputs["Subsurface Scale"].default_value = 0.05
+
+    if "Coat Weight" in principled.inputs:
+        principled.inputs["Coat Weight"].default_value = 0.65
+    elif "Clearcoat" in principled.inputs:
+        principled.inputs["Clearcoat"].default_value = 0.65
+
+    if "Coat Roughness" in principled.inputs:
+        principled.inputs["Coat Roughness"].default_value = 0.15
+    elif "Clearcoat Roughness" in principled.inputs:
+        principled.inputs["Clearcoat Roughness"].default_value = 0.15
+
+    if "Coat IOR" in principled.inputs:
+        principled.inputs["Coat IOR"].default_value = 1.45
+    elif "Clearcoat IOR" in principled.inputs:
+        principled.inputs["Clearcoat IOR"].default_value = 1.45
+
+    if "Specular IOR Level" in principled.inputs:
+        principled.inputs["Specular IOR Level"].default_value = 0.5
+    elif "Specular" in principled.inputs:
+        principled.inputs["Specular"].default_value = 0.5
+
+    # Material Output
+    output = tree.nodes.new("ShaderNodeOutputMaterial")
+    output.name = "Material Output"
+    output.location = (480.0, 300.0)
+    output.width = 140.0
+    tree.links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+
+    # Texture Coordinate
+    tex_coord = tree.nodes.new("ShaderNodeTexCoord")
+    tex_coord.name = "Texture Coordinate"
+    tex_coord.location = (-1100.0, 300.0)
+    tex_coord.width = 140.0
+
+    # Mapping
+    mapping = tree.nodes.new("ShaderNodeMapping")
+    mapping.name = "Mapping"
+    mapping.vector_type = 'POINT'
+    mapping.location = (-850.0, 300.0)
+    mapping.width = 140.0
+    if "Scale" in mapping.inputs:
+        mapping.inputs["Scale"].default_value = (2.0, 12.0, 2.0)
+    tree.links.new(tex_coord.outputs["Generated"], mapping.inputs["Vector"])
+
+    # Voronoi Texture
+    voronoi = tree.nodes.new("ShaderNodeTexVoronoi")
+    voronoi.name = "Voronoi Texture"
+    voronoi.voronoi_dimensions = '3D'
+    voronoi.feature = 'F1'
+    voronoi.distance = 'EUCLIDEAN'
+    voronoi.normalize = True
+    voronoi.location = (-600.0, 440.0)
+    voronoi.width = 140.0
+    if "Scale" in voronoi.inputs:
+        voronoi.inputs["Scale"].default_value = 12.0
+    if "Detail" in voronoi.inputs:
+        voronoi.inputs["Detail"].default_value = 0.5
+    if "Roughness" in voronoi.inputs:
+        voronoi.inputs["Roughness"].default_value = 0.5
+    tree.links.new(mapping.outputs["Vector"], voronoi.inputs["Vector"])
+
+    # Noise Texture
+    noise = tree.nodes.new("ShaderNodeTexNoise")
+    noise.name = "Noise Texture"
+    noise.noise_dimensions = '3D'
+    noise.normalize = True
+    noise.location = (-600.0, 160.0)
+    noise.width = 140.0
+    if "Scale" in noise.inputs:
+        noise.inputs["Scale"].default_value = 8.0
+    if "Detail" in noise.inputs:
+        noise.inputs["Detail"].default_value = 2.0
+    if "Roughness" in noise.inputs:
+        noise.inputs["Roughness"].default_value = 0.4
+    if "Distortion" in noise.inputs:
+        noise.inputs["Distortion"].default_value = 0.15
+    tree.links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+
+    # Mix
+    mix = tree.nodes.new("ShaderNodeMix")
+    mix.name = "Mix"
+    mix.data_type = 'RGBA'
+    mix.blend_type = 'SOFT_LIGHT'
+    mix.location = (-340.0, 300.0)
+    mix.width = 140.0
+    if "Factor" in mix.inputs:
+        mix.inputs["Factor"].default_value = 0.6
+    tree.links.new(voronoi.outputs["Distance"], mix.inputs["A"])
+    tree.links.new(noise.outputs["Color"], mix.inputs["B"])
+
+    # Color Ramp for Base Color (collagen tones)
+    ramp = tree.nodes.new("ShaderNodeValToRGB")
+    ramp.name = "Color Ramp"
+    ramp.location = (-100.0, 380.0)
+    ramp.width = 240.0
+    cr = ramp.color_ramp
+    cr.color_mode = 'RGB'
+    cr.interpolation = 'LINEAR'
+    cr.elements[0].position = 0.0
+    cr.elements[0].color = (0.64, 0.60, 0.52, 1.0)
+    cr.elements[1].position = 1.0
+    cr.elements[1].color = (0.94, 0.92, 0.87, 1.0)
+
+    mid1 = cr.elements.new(0.35)
+    mid1.color = (0.76, 0.73, 0.66, 1.0)
+    mid2 = cr.elements.new(0.70)
+    mid2.color = (0.86, 0.84, 0.78, 1.0)
+
+    tree.links.new(mix.outputs["Result"], ramp.inputs["Fac"])
+    tree.links.new(ramp.outputs["Color"], principled.inputs["Base Color"])
+
+    # Bump for subtle surface collagen relief
+    bump = tree.nodes.new("ShaderNodeBump")
+    bump.name = "Bump"
+    bump.invert = True
+    bump.location = (-60.0, 120.0)
+    bump.width = 140.0
+    if "Strength" in bump.inputs:
+        bump.inputs["Strength"].default_value = 0.16
+    if "Distance" in bump.inputs:
+        bump.inputs["Distance"].default_value = 1.5
+
+    tree.links.new(mix.outputs["Result"], bump.inputs["Height"])
+    tree.links.new(bump.outputs["Normal"], principled.inputs["Normal"])
+
+    return mat
+
+
+def apply_ligament_material(mesh_obj):
+    """Assign the ligament material to a mesh, creating the material if needed.
+
+    :arg mesh_obj: Mesh object to assign the ligament material to.
+    :type mesh_obj: :class:`bpy.types.Object`
+    :return: True on success.
+    :rtype: bool
+    """
+    if not mesh_obj or mesh_obj.type != 'MESH':
+        return False
+
+    ligament_material = create_ligament_material()
+    mesh_obj.data.materials.clear()
+    mesh_obj.data.materials.append(ligament_material)
+    return True
+
 

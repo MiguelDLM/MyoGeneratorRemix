@@ -10,7 +10,7 @@ All operators of MyoGeneratorRemix, as callable from Python. Generated from the 
 
 Submit muscle name and create collection
 
-class `Muscle_Name_Submition` · `core_operators.py`
+class `Muscle_Name_Submition` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -20,7 +20,7 @@ _No parameters._
 
 Estimate summed volume of selected mesh objects
 
-class `Estimate_Selected_Volumes_Op` · `core_operators.py`
+class `Estimate_Selected_Volumes_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -30,7 +30,7 @@ _No parameters._
 
 Duplicate selected objects mirrored across chosen axis (X/Y/Z)
 
-class `MYOGENERATOR_OT_mirror_duplicate` · `core_operators.py`
+class `MYOGENERATOR_OT_mirror_duplicate` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -42,7 +42,7 @@ class `MYOGENERATOR_OT_mirror_duplicate` · `core_operators.py`
 
 Select origin faces
 
-class `Select_Origin_Op` · `core_operators.py`
+class `Select_Origin_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -52,7 +52,7 @@ _No parameters._
 
 Select insertion faces
 
-class `Select_Insertion_Op` · `core_operators.py`
+class `Select_Insertion_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -62,7 +62,7 @@ _No parameters._
 
 Submit origin selection
 
-class `Submit_Origin_Op` · `core_operators.py` · poll: `return context.object is not None and context.object.mode == 'EDIT'`
+class `Submit_Origin_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}` · poll: `return context.object is not None and context.object.mode == 'EDIT'`
 
 _No parameters._
 
@@ -72,7 +72,7 @@ _No parameters._
 
 Submit insertion selection
 
-class `Submit_Insertion_Op` · `core_operators.py` · poll: `return context.object is not None and context.object.mode == 'EDIT'`
+class `Submit_Insertion_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}` · poll: `return context.object is not None and context.object.mode == 'EDIT'`
 
 _No parameters._
 
@@ -82,9 +82,80 @@ _No parameters._
 
 Move to next muscle
 
-class `Next_Muscle_Op` · `core_operators.py`
+class `Next_Muscle_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
+
+### `bpy.ops.myogen.create_ligament_material()`
+
+**Create Ligament Material** — Create the procedural ligament material with dense collagen striations and subsurface scattering so it can be assigned to other elements
+
+Create or get the procedural ligament material in the scene
+
+class `Create_Ligament_Material_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+
+_No parameters._
+
+### `bpy.ops.myogen.recall_attachment(role='origin')`
+
+**Edit Attachment Faces** — Select the faces on the bone that currently form this attachment, allowing you to add or remove faces before re-submitting
+
+Select the attachment faces on the bone in Edit Mode to allow adjustments
+
+class `Recall_Attachment_Faces_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `role` | string | `'origin'` | **Attachment Role**. Attachment to edit ('origin' or 'insertion') |
+
+### `bpy.ops.myogen.rename_muscle(muscle='', new_name='')`
+
+**Rename Muscle** — Rename the current muscle and all its associated objects, collection and metadata
+
+Rename the current muscle, its collection, objects and records
+
+class `Rename_Muscle_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `muscle` | string | `''` | **Target Muscle**. Name of the muscle to rename (empty for active muscle) |
+| `new_name` | string | `''` | **New Name**. New name for the muscle (use _left/_right for bilateral muscles) |
+
+### `bpy.ops.myogen.delete_muscle(muscle='')`
+
+**Delete Muscle** — Delete the current muscle collection, its objects and construction helpers
+
+Delete the current muscle collection and its objects
+
+class `Delete_Muscle_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `muscle` | string | `''` | **Target Muscle**. Name of the muscle to delete (empty for active muscle) |
+
+### `bpy.ops.myogen.select_muscle(name='')`
+
+**Select Muscle** — Set this muscle as the active muscle in MyoGenerator
+
+Select and activate a muscle for editing
+
+class `Select_Muscle_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | `''` | **Muscle**. Name of the muscle collection to activate |
+
+### `bpy.ops.myogen.select_muscle_menu(muscle='...')`
+
+**Select Muscle** — Select an existing muscle to view or edit
+
+Select a muscle from the list of existing muscles
+
+class `Select_Muscle_Menu_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `muscle` | enum | `''` | **Muscle**. Existing muscles in the scene |
 
 ### `bpy.ops.myogen.check_muscles()`
 
@@ -92,17 +163,17 @@ _No parameters._
 
 Run the plausibility checks without exporting
 
-class `Check_Muscles_Op` · `core_operators.py`
+class `Check_Muscles_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
-### `bpy.ops.myogen.show_belly_fibres()`
+### `bpy.ops.myogen.trace_fibres()`
 
-**Show Belly Fibres** — Trace the fibres of every finished belly from the origin to the insertion (Laplacian field) and show them as curves, to check the fibre lengths used for the PCSA; again to hide them
+**Trace Fibres** — Trace the fibres of every finished belly (seeding and number as set), measure the muscles with them as Check Muscles does, and show the fibres (detours in magenta)
 
-Show or hide the fibres traced through every belly
+Trace the belly fibres of every muscle and show them
 
-class `Show_Belly_Fibres_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
+class `Trace_Fibres_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}` · poll: `return context.scene.myogen.fiber_length_source == 'BELLY_FIBRES'`
 
 _No parameters._
 
@@ -124,7 +195,7 @@ class `Set_Unit_Scale_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'
 
 Calculate muscle parameters and save to CSV
 
-class `Calculate_Muscle_Parameters_Op` · `core_operators.py`
+class `Calculate_Muscle_Parameters_Op` · `core_operators.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -136,17 +207,17 @@ _No parameters._
 
 Start the live preview of the muscle belly
 
-class `Muscle_Preview_Update_Op` · `improved_muscle_workflow.py`
+class `Muscle_Preview_Update_Op` · `improved_muscle_workflow.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
-### `bpy.ops.myogen.muscle_preview_stop()`
+### `bpy.ops.myogen.muscle_preview_discard()`
 
-**Stop Preview** — Stop rebuilding the preview on changes; the preview mesh is kept
+**Discard Preview** — Stop the live preview and delete the preview mesh, e.g. to redo an attachment. The path and the rings (hidden) are kept: Start Preview brings the same shape back
 
-Stop updating the preview
+Discard the live preview
 
-class `Muscle_Preview_Stop_Op` · `improved_muscle_workflow.py`
+class `Muscle_Preview_Discard_Op` · `improved_muscle_workflow.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -156,7 +227,7 @@ _No parameters._
 
 Edit the muscle path in Edit Mode
 
-class `Muscle_Edit_Path_Op` · `improved_muscle_workflow.py`
+class `Muscle_Edit_Path_Op` · `improved_muscle_workflow.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -166,7 +237,7 @@ _No parameters._
 
 Replace the path with the default one
 
-class `Muscle_Reset_Path_Op` · `improved_muscle_workflow.py`
+class `Muscle_Reset_Path_Op` · `improved_muscle_workflow.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._
 
@@ -176,7 +247,7 @@ _No parameters._
 
 Select the section rings
 
-class `Muscle_Select_Rings_Op` · `improved_muscle_workflow.py` · poll: `return context.scene.myogen.use_controls`
+class `Muscle_Select_Rings_Op` · `improved_muscle_workflow.py` · options `{'REGISTER', 'UNDO'}` · poll: `return context.scene.myogen.use_controls`
 
 _No parameters._
 
@@ -186,7 +257,7 @@ _No parameters._
 
 Replace the rings with evenly spaced default ones
 
-class `Muscle_Reset_Rings_Op` · `improved_muscle_workflow.py` · poll: `return context.scene.myogen.use_controls`
+class `Muscle_Reset_Rings_Op` · `improved_muscle_workflow.py` · options `{'REGISTER', 'UNDO'}` · poll: `return context.scene.myogen.use_controls`
 
 _No parameters._
 
@@ -196,6 +267,57 @@ _No parameters._
 
 Generate the final muscle mesh
 
-class `Muscle_Mesh_Generation_Op` · `improved_muscle_workflow.py`
+class `Muscle_Mesh_Generation_Op` · `improved_muscle_workflow.py` · options `{'REGISTER', 'UNDO'}`
+
+_No parameters._
+
+## `myoGenerator_panel`
+
+### `bpy.ops.myogen.qa_finding(message='...', level='...')`
+
+**QA Finding** — QA finding
+
+One QA finding: hover for the full text, click to print it
+
+class `MYOGEN_OT_qa_finding` · `myoGenerator_panel.py` · options `{'INTERNAL'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `message` | string | `''` | **Message**. Full text of the finding |
+| `level` | string | `''` | **Level**. Finding level (OK, INFO, WARNING, ERROR) |
+
+## `visibility`
+
+### `bpy.ops.myogen.toggle_kind(kind='...')`
+
+**Toggle Type** — Show or hide this type of object in every muscle (hide if any is visible)
+
+Show or hide one type of object in every muscle
+
+class `MYOGEN_OT_toggle_kind` · `visibility.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `kind` | enum | `''` | **Type**. Type of object |
+
+### `bpy.ops.myogen.solo_kind(kind='...')`
+
+**Show Only Type** — Show this type of object in every muscle and hide every other MyoGen object
+
+Show only one type of object in every muscle
+
+class `MYOGEN_OT_solo_kind` · `visibility.py` · options `{'REGISTER', 'UNDO'}`
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `kind` | enum | `''` | **Type**. Type of object |
+
+### `bpy.ops.myogen.show_all_kinds()`
+
+**Show All** — Show every MyoGen object of every muscle (also the fibres, hidden when written)
+
+Show every MyoGen object
+
+class `MYOGEN_OT_show_all_kinds` · `visibility.py` · options `{'REGISTER', 'UNDO'}`
 
 _No parameters._

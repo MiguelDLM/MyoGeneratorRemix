@@ -53,12 +53,13 @@ Dependency rules:
 
 ```
 Submit Muscle            myogen.submit_muscle            muscles/<M> collection (+ partial record)
-Origin's Bone            scene.myogen.origin_object
-Start Origin Selection   myogen.select_origin            Edit Mode, face select, lasso
+Origin bone              scene.myogen.origin_object
+Paint Origin             myogen.select_origin            Edit Mode, face select, circle select
 Submit Origin            myogen.submit_origin            <M>_origin (faces) + <M>_origin_contour (boundary)
 (same for the insertion) myogen.select_insertion / submit_insertion
-Start / Stop Preview     myogen.muscle_preview_update    <M>_preview (solid, draft) + <M>_tube (wire, instant);
-                         myogen.muscle_preview_stop      the default path <M>_curve is created if missing
+Start Preview            myogen.muscle_preview_update    <M>_preview (solid, the final shape) + <M>_tube (wire, instant),
+                                                         kept live; the default path <M>_curve is created if missing
+Discard Preview (X)      myogen.muscle_preview_discard   stop, delete preview and tube; path kept, rings hidden
 Muscle type              scene.myogen.muscle_shape       Fusiform / Parallel (tube) · Fan (fibres)
 Edit / Reset Path        myogen.edit_path, reset_path    the course of the belly (user's curve)
 Shape with rings         scene.myogen.use_controls       rings on the path: G slides, S sizes, R turns
@@ -66,8 +67,11 @@ Select / Reset Rings     myogen.select_rings, reset_rings
 Generate Final Mesh      myogen.muscle_mesh_generation   <M>_muscle at full resolution, anchored vertices
                                                          protected; preview, tube and rings removed,
                                                          path kept
-Next Muscle              myogen.next_muscle
-Check Muscles            myogen.check_muscles            measure + QA + write records
+Next Muscle              myogen.next_muscle              stops the live preview, clears the name
+Trace Fibres             myogen.trace_fibres             (Belly fibres only) as Check Muscles, then shows
+                                                         <M>_fibres / <M>_fibre_detours
+Check Muscles            myogen.check_muscles            measure + QA + write records (+ <M>_fibres, hidden,
+                                                         with Fibre length from: Belly fibres)
 Calculate & Export CSV   myogen.calculate_muscle_parameters   same + <folder>/<file>.csv
 ```
 
@@ -108,11 +112,20 @@ Calculate & Export CSV   myogen.calculate_muscle_parameters   same + <folder>/<f
    muscle arises from (e.g. the temporal fossa, the sternum and clavicle).
 4. **Preview** (`volume_builder.start_live`): a wire `<M>_tube` refreshed
    `TUBE_DELAY` s after a change (instant feedback while dragging) and the
-   solid `<M>_preview` at draft resolution `LIVE_DELAY` s after the last
-   change. Changes are detected by a `depsgraph_update_post` handler that
-   compares a signature of the path, rings and attachments
-   (`_state`) with the one left by the last rebuild, so the rebuild's own
-   edits (ring snapping) do not loop; settings call
+   solid `<M>_preview` `LIVE_DELAY` s after the last change. The preview is
+   built with the final voxel and all the fan fibres, so Generate Final Mesh
+   gives exactly the preview; only when the final grid exceeds
+   `FULL_PREVIEW_CELLS` (1.5 M cells) does it use the draft voxel
+   (`DRAFT_VOXEL_SCALE`), and the status says "draft". Every length of the
+   shape (e.g. the automatic attachment layer, 3 final voxels) comes from the
+   final voxel, never the draft one. (Earlier versions always previewed at
+   1.8× the voxel, and the automatic layer grew with it: a temporalis
+   previewed 69 cm³ and came out 45 cm³.) Changes are detected by a
+   `depsgraph_update_post` handler that compares the path, rings and
+   attachments (`_state`) with what the last rebuild left, within a relative
+   tolerance (`STATE_TOLERANCE`): Blender reads the rings placed by a
+   rebuild back a few 1e-6 off, and an exact comparison made each rebuild
+   schedule the next one, endlessly. Settings call
    `volume_builder.on_setting_changed`.
 5. **Final mesh** (`volume_builder.generate_final`): the same at full
    resolution; the anchored vertices are protected for sculpting and the
@@ -133,9 +146,16 @@ concave or wrapping attachment (a fossa, the temporalis insertion around the
 coronoid process) lies inside the bone. `preview.attachment_anchor` takes the
 point of the surface nearest to the centroid moved towards the other
 attachment, with the outward normal there (`preview.outward_sign`: face
-normals tested against the bone by ray parity). The end is lifted by
-`PATH_LIFT` × the attachment size along that normal, and the second and
-fourth points bulge along the normals (`PATH_BEND`). All radii start at 1:
+normals tested against the bone by ray parity). The terminal vertices of
+the path lie **on** the attachment surfaces at those points, so the path
+runs attachment to attachment. The three inner points lie on the straight
+line between the two ends: only a point that falls inside a bone is moved
+out of it, `PATH_LIFT` × the attachment size clear
+(`preview.push_out_of_bones`), so the path bends only where the bone is in
+the way. (Earlier versions lifted the ends off the surfaces, which made the
+path shorter than the attachment-to-attachment distance.) (Earlier versions pushed the 2nd
+and 4th points along the two attachment normals, which gave an S-shaped
+path whenever the normals pointed different ways.) All radii start at 1:
 the muscle type gives the belly.
 
 ### Legacy loft (`preview.build_loft`, not used by the panel)
@@ -163,7 +183,10 @@ section radius / 6, or the fibre radius / 3 for fans; never more than
 | bones | − the origin and insertion bones (ray parity, scanlines along +Z) |
 
 The field is meshed by surface nets and rebuilt by Blender's voxel remesher
-(`manifold_remesh`, always closed and manifold); vertices within one voxel of
+(`manifold_remesh`, always closed and manifold; a Remesh modifier evaluated
+on a temporary object, never the `voxel_remesh` operator: operators called
+from the live preview's timers pushed undo steps and Ctrl+Z crashed
+Blender. Every operator that changes data declares `{'REGISTER', 'UNDO'}`); vertices within one voxel of
 an attachment are snapped onto it and anchored (`myo_deform` 0 →
 `myo_anchored` group and sculpt mask); pieces that reach no attachment are
 dropped (`report["pieces"] > 1` = parts that do not join); the
@@ -257,7 +280,7 @@ roles copied.
 | volume | `|signed volume|` of the belly (bmesh, world space). If the mesh has self-intersections or non-manifold edges, `myo_record.robust_volume` measures the volume actually enclosed (voxel union at two resolutions, or the generalized winding number when that fails) and uses it when it differs by more than 2 % |
 | hole error | relative volume change after filling the belly's holes |
 | path length | evaluated Bezier length of `<M>_curve` (sampled, not control points) |
-| linear length | straight distance between origin and insertion centroids |
+| linear length | straight distance between the path's terminal vertices (`myo_record.curve_ends`), i.e. between the same points the path joins; between the attachment centroids when there is no path. (Before 3.0-alpha2 it was always centroid to centroid, which the path, starting at the anchor points, was nearly always shorter than.) |
 | fibre length | `Fibre length from` = **Path (MyoGenerator)**, the default: `path length × ratio` (ratio 1 = the original MyoGenerator, Herbst et al. 2022); or **Belly fibres**: weighted `mean(L_i) × ratio`, `L_i` the fibres traced through the finished belly (see *Belly fibres* below) |
 | PCSA | `volume × cos(pennation) / fibre length` (defaults: parallel fibres, no tendon); with belly fibres, optionally **Sum over fibres**: `cos(pennation) × Σ V_i / (L_i × ratio)`, `V_i` each fibre's share of the volume (`myo_record.pcsa_from_fibres`) |
 | force | `PCSA × specific tension` (default 30 N/cm² = 0.3 N/mm²) |
@@ -269,6 +292,29 @@ origin_centroid_BU, insertion_centroid_BU, density_g_cm3,
 specific_tension_N_cm2, fiber_length_ratio, pennation_deg, fiber_length_source,
 fiber_count, fiber_length_sd_cm, fiber_length_min_cm, fiber_length_max_cm,
 fiber_reached, fiber_detoured, origin_contact, insertion_contact, pcsa_method, qa`.
+
+### Muscle list
+
+The *Muscles* box has one collapsible row per muscle: status icon, name and
+the number of errors and warnings ("OK" when none). Expanded: `volume ·
+PCSA · force`, a short label per finding, errors first, then warnings and
+notes (`myoGenerator_panel.short_finding`, e.g. "Overlap mass_deep 41%",
+"Defective mesh"; the full message is the tooltip and is printed on click,
+`myogen.qa_finding`), and a collapsed *Texture* section. The records keep the
+full messages (MUFIS reads them unchanged).
+
+### Show in Scene
+
+`visibility.py` adds a *Show in Scene* panel (same sidebar tab): for each
+object type of every muscle (origins and insertions with their contours,
+bellies, paths, fibres) a toggle (pressed = some
+visible; hides all if any is visible) and *Only* (show that type, hide the
+other MyoGen objects), plus *Show All*. Types come from `myo_role` and the
+MyoGen name suffixes (`visibility.kind_of`); objects that are not MyoGen
+muscles are never touched. The older *Muscles / Attachments / Curves*
+settings stay for old files but are no longer shown. The preview and the
+rings are not types: they belong to the one muscle being built and
+*Generate Final Mesh* removes them.
 
 ### Belly fibres
 
@@ -284,12 +330,21 @@ fixed layer has no gradient) and closed onto the other attachment.
 **Where a fibre ends is not chosen**: it follows the field. The field's
 flux gathers on the parts of an attachment nearest to (and most open to)
 the bulk of the belly, like field lines between two electrodes, so fibres
-seeded evenly over the origin bunch up on part of the insertion (on the
-MUDYS specimens they reached about half of it) and the mean length depends
-on the side seeded (×2 on a temporalis). Fibres are therefore seeded
-evenly over **both** attachments (origin → insertion, and insertion →
-origin reversed), each set with half of the weight: both areas are covered
-and the weighted mean length is symmetric.
+seeded evenly over one attachment bunch up on part of the other (on the
+MUDYS specimens, origin-seeded fibres reached about half of the insertion)
+and the mean length depends on the side seeded (×2 on a temporalis).
+**Seeding** (`scene.myogen.fibre_seeding`, `belly_fibres.SEEDINGS`):
+
+| seeding | fibres | coverage | weights |
+|---|---|---|---|
+| `BOTH` (default) | `count` from the origin + `count` from the insertion (reversed) | both attachments, each set bunched on the other side | half per set, by seed area |
+| `PAIRED` | one per pair: `count` points on each attachment, paired by optimal transport (`assignment`, Hungarian) with cost `‖end(f) − seed_i‖² + ‖start(b) − seed_o‖²`, the fibre blending (by field value) from the origin streamline into the insertion one (`paired_courses`) | uniform on both | equal |
+| `ORIGIN` | `count` from the origin | origin uniform, insertion bunched | by seed area |
+| `INSERTION` | `count` from the insertion | insertion uniform, origin bunched | by seed area |
+
+A paired fibre with more than 10 % of its inner points outside the belly is
+also a detour. The seeding is stored with the exported fibres
+(`myo_fibre_seeding`) and reported by MUFIS.
 
 Fibres longer than `DETOUR_MAX` (2) × the straight distance between their
 ends are **detours** (the field following a thin curved sheet round a
@@ -297,8 +352,10 @@ bend): they are left out of the lengths and of the volume shares, and shown
 in magenta. Each kept fibre gets the belly voxels nearest to it as its
 volume share. `origin_contact` / `insertion_contact` measure how much of
 each attachment's area the belly touches: no fibre can reach the rest.
-Results are cached until the belly or the attachments change. **Show Belly
-Fibres** draws them as `<M>_belly_fibres` (+ `_detours`).
+Results are cached until the belly or the attachments change. *Check
+Muscles* / *Calculate* write the kept fibres as `<M>_fibres` and the detours
+as `<M>_fibre_detours` (both hidden; *Show in Scene* > *Fibres* shows them);
+*Trace Fibres* does the same and shows them.
 
 The fibres run attachment to attachment, tendon included: they measure the
 belly, not fascicles. The ratio still converts them to fascicle length, and
@@ -307,6 +364,14 @@ pennation and a ratio. QA warns when the belly touches < 50 % of an
 attachment's area, < 80 % of the fibres arrive, > 10 % detour, or the
 longest fibre exceeds 2.5 × the path; when the fibres cannot be traced the
 path is used, with a warning.
+
+**Export for simulators.** With *Belly fibres*, *Calculate Muscle
+Parameters* also writes `<M>_fibres` (`belly_fibres.export_fibres`): every
+kept fibre resampled to 15 segments (as in Modenese & Kohout 2020) with its
+rest length and its PCSA by area and by own volume / own length
+(`myo_record.fibre_pcsa`); layout in `MUSCLE_RECORD.md`, *Fibres*. MUFIS
+moves them with the jaw and applies each fibre's force along its last
+segment.
 
 ### Plausibility checks (`myo_record.check_*`)
 
@@ -323,9 +388,11 @@ bones or, without them, the extent of all attachment surfaces.
 | self-intersecting / non-manifold belly | WARNING / INFO | enclosed volume differs > 2 % (`OVERLAP_VOLUME_TOLERANCE`) from the signed sum: the enclosed volume is used / minor defects |
 | inverted normals | INFO | negative signed volume |
 | path / linear length | WARNING | outside 0.9 – 1.8 (`PATH_TO_LINEAR`) |
+| path end off its area | WARNING | a terminal vertex farther than 0.1 × the path length from its attachment surface (`PATH_END_TO_PATH`, `check_path_ends`) |
 | fibre length / skull | WARNING | outside 0.03 – 1.2 (`FIBER_TO_REF`) |
 | ∛volume / skull | WARNING | outside 0.01 – 0.6 (`CBRT_VOLUME_TO_REF`) |
 | left / right volume | WARNING | ratio > 1.5 (`BILATERAL_VOLUME_RATIO`) |
+| muscles overlapping | WARNING / INFO | volume inside two bellies ≥ 2 % of the smaller one (`MUSCLE_OVERLAP_WARNING`): two muscles in the same space; 0.2–2 % (`MUSCLE_OVERLAP_INFO`): minor interpenetration; below: contact, not reported. `muscle_metrics.belly_overlaps`: closed copies of both bellies rasterised on one grid (64 cells across the intersection of their boxes); a belly too defective to close is reported as not checked |
 | density, tension, fibre ratio | WARNING | 1.0–1.1 g/cm³, 10–60 N/cm², 0.3–1.0 |
 
 Findings are stored in `myo_qa`, shown in the panel's QA box and exported in

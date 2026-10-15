@@ -270,6 +270,169 @@ def _field_phase(vertices, u, field):
     return np.einsum('ij,ij->i', np.asarray(vertices) - c, a) / hw * float(np.mean(halves))
 
 
+def fibre_coordinates_from_streamlines(vertices, streamlines, arrangement,
+                                       pennation_deg=DEFAULT_PENNATION, bundles=None,
+                                       edges=None):
+    """Fibre texture coordinates of points of a belly interpolated from streamline courses.
+
+    Used when belly fibres have been simulated (:mod:`belly_fibres`) or generated
+    from the fan model (:func:`fan.fibres`). Each streamline is a single fibre
+    fascicle whose phase (across-width position) is constant along its entire length,
+    preventing transverse ripples and ensuring striations run smoothly from origin
+    to insertion. Streamlines are smoothed and interpolated with a Gaussian kernel
+    and graph Laplacian smoothing across mesh edges to eliminate polygonal faceting.
+
+    :arg vertices: World-space vertex positions, (N, 3).
+    :type vertices: :class:`numpy.ndarray`
+    :arg streamlines: Streamline polylines, (M, K, 3) or sequence of polylines.
+    :type streamlines: sequence of sequences of 3 floats
+    :arg arrangement: One of ``ARRANGEMENTS``.
+    :type arrangement: str
+    :arg pennation_deg: Angle between fibres and tendon (pennate arrangements).
+    :type pennation_deg: float
+    :arg bundles: Fibre bundles across the muscle's width drawn by the
+       material (default ``DEFAULT_BUNDLES``).
+    :type bundles: float
+    :arg edges: Mesh edge vertex index pairs (E, 2) used for surface Laplacian
+       smoothing (optional).
+    :type edges: :class:`numpy.ndarray` or None
+    :return: ``(coords, u, mean_length)``: (N, 3) ``(along, phase, depth)``,
+       (N,) position along the fibres (0-1), and mean streamline length (world units).
+    :rtype: tuple of (:class:`numpy.ndarray`, :class:`numpy.ndarray`, float)
+    """
+    from mathutils import Vector
+    from mathutils.kdtree import KDTree
+
+    lines = np.asarray(streamlines, dtype=float)
+    if lines.ndim != 3 or lines.shape[0] < 1 or lines.shape[1] < 2:
+        raise ValueError("streamlines must be a sequence of polylines of 2 or more points")
+    n_lines, orig_pts, _ = lines.shape
+
+    target_pts = max(orig_pts, 48)
+    smooth_lines = np.empty((n_lines, target_pts, 3))
+    for i in range(n_lines):
+        line = lines[i]
+        d = np.linalg.norm(line[1:] - line[:-1], axis=1)
+        s = np.concatenate(([0.0], np.cumsum(d)))
+        s_norm = s / (s[-1] or 1.0)
+        t_dense = np.linspace(0.0, 1.0, target_pts)
+        for dim in range(3):
+            smooth_lines[i, :, dim] = np.interp(t_dense, s_norm, line[:, dim])
+        for _ in range(3):
+            smooth_lines[i, 1:-1, :] = (0.25 * smooth_lines[i, :-2, :] +
+                                        0.5 * smooth_lines[i, 1:-1, :] +
+                                        0.25 * smooth_lines[i, 2:, :])
+    lines = smooth_lines
+    n_pts = target_pts
+
+    starts = lines[:, 0, :]
+    ends = lines[:, -1, :]
+
+    seg_lens = np.linalg.norm(lines[:, 1:, :] - lines[:, :-1, :], axis=2)
+    line_lens = seg_lens.sum(axis=1)
+    mean_len = float(line_lens.mean()) or 1.0
+
+    if arrangement == 'CONVERGENT':
+        apex = ends.mean(0)
+        v = starts - apex
+        mean_v = v.mean(0)
+        mean_v_dir = mean_v / max(float(np.linalg.norm(mean_v)), 1e-12)
+        _, _, vh = np.linalg.svd(v)
+        n_fan = vh[2]
+        t_fan = np.cross(n_fan, mean_v_dir)
+        t_fan /= max(float(np.linalg.norm(t_fan)), 1e-12)
+        x = v @ mean_v_dir
+        y = v @ t_fan
+        angles = np.arctan2(y, x)
+        r_mean = float(np.linalg.norm(v, axis=1).mean())
+        phi_per_line = angles * r_mean
+    else:
+        flow = ends.mean(0) - starts.mean(0)
+        u_flow = flow / max(float(np.linalg.norm(flow)), 1e-12)
+        centre_profile = lines.mean(axis=0)
+        diff = lines - centre_profile[None, :, :]
+        diff_perp = diff.reshape(-1, 3) - np.outer(diff.reshape(-1, 3) @ u_flow, u_flow)
+        _, _, vh = np.linalg.svd(diff_perp)
+        w_axis = vh[0]
+        phi_per_line = ((lines - centre_profile[None, :, :]) @ w_axis).mean(axis=1)
+
+    width = float(phi_per_line.max() - phi_per_line.min()) or 1.0
+
+    all_pts = lines.reshape(-1, 3)
+    all_phi = np.repeat(phi_per_line, n_pts)
+    u_per_pt = np.tile(np.linspace(0.0, 1.0, n_pts), n_lines)
+    all_along = u_per_pt * mean_len
+
+    tree = KDTree(len(all_pts))
+    for idx, pt in enumerate(all_pts):
+        tree.insert(Vector(pt), idx)
+    tree.balance()
+
+    V = np.asarray(vertices, dtype=float)
+    v_count = len(V)
+
+    sample_v = V[::max(1, v_count // 50)]
+    d3_list = []
+    for sv in sample_v:
+        near = tree.find_n(Vector(sv), 4)
+        if len(near) >= 4:
+            d3_list.append(near[3][2])
+    sigma = float(np.median(d3_list)) * 2.0 if len(d3_list) else 3.0
+    sigma = max(sigma, 1.0)
+    sigma_sq_2 = 2.0 * sigma * sigma
+
+    k_neighbors = min(24, len(all_pts))
+    out_along = np.zeros(v_count)
+    out_phi = np.zeros(v_count)
+    out_u = np.zeros(v_count)
+
+    for i in range(v_count):
+        nearest = tree.find_n(Vector(V[i]), k_neighbors)
+        dists = np.array([n[2] for n in nearest])
+        indices = np.array([n[1] for n in nearest])
+
+        weights = np.exp(-(dists * dists) / sigma_sq_2)
+        w_sum = weights.sum()
+        w_norm = weights / w_sum if w_sum > 1e-12 else np.ones(len(nearest)) / len(nearest)
+
+        out_along[i] = np.dot(w_norm, all_along[indices])
+        out_phi[i] = np.dot(w_norm, all_phi[indices])
+        out_u[i] = np.dot(w_norm, u_per_pt[indices])
+
+    if edges is not None and len(edges) > 0:
+        edges_arr = np.asarray(edges, dtype=int).reshape(-1, 2)
+        deg = np.bincount(edges_arr.ravel(), minlength=v_count)
+        deg_inv = np.where(deg > 0, 1.0 / deg, 0.0)
+        for _ in range(12):
+            sum_phi = (np.bincount(edges_arr[:, 0], weights=out_phi[edges_arr[:, 1]], minlength=v_count) +
+                       np.bincount(edges_arr[:, 1], weights=out_phi[edges_arr[:, 0]], minlength=v_count))
+            sum_along = (np.bincount(edges_arr[:, 0], weights=out_along[edges_arr[:, 1]], minlength=v_count) +
+                         np.bincount(edges_arr[:, 1], weights=out_along[edges_arr[:, 0]], minlength=v_count))
+            sum_u = (np.bincount(edges_arr[:, 0], weights=out_u[edges_arr[:, 1]], minlength=v_count) +
+                     np.bincount(edges_arr[:, 1], weights=out_u[edges_arr[:, 0]], minlength=v_count))
+            out_phi = 0.5 * out_phi + 0.5 * (sum_phi * deg_inv)
+            out_along = 0.5 * out_along + 0.5 * (sum_along * deg_inv)
+            out_u = 0.5 * out_u + 0.5 * (sum_u * deg_inv)
+
+    if arrangement in PENNATE:
+        alpha = math.radians(pennation_deg)
+        if arrangement == 'PENNATE':
+            across = out_phi + width / 2.0
+        elif arrangement == 'BIPENNATE':
+            across = np.abs(out_phi)
+        else:
+            spacing = width / MULTIPENNATE_TENDONS
+            across = np.abs(np.mod(out_phi + width / 2.0, spacing) - spacing / 2.0)
+        p_rot = -out_along * math.sin(alpha) + across * math.cos(alpha)
+        a_rot = out_along * math.cos(alpha) + across * math.sin(alpha)
+        out_phi, out_along = p_rot, a_rot
+
+    bundles = bundles or DEFAULT_BUNDLES
+    k_scale = bundles / MATERIAL_CELLS_ACROSS / width
+    coords = np.stack([out_along, out_phi, np.zeros(v_count)], axis=1) * k_scale
+    return coords, out_u, mean_len
+
+
 def bundle_size(vertices, coords):
     """World size of one unit of the fibre coordinates (Blender units per unit).
 
@@ -365,22 +528,57 @@ def apply_fibre_texture(context, belly, arrangement=None, pennation_deg=None):
     V = co.reshape(-1, 3) @ m[:3, :3].T + m[:3, 3]
     objs = myo_record.resolve_objects(coll)
     points = tube.sample_path(path)
-    length = sum((b - a).length for a, b in zip(points[:-1], points[1:])) or 1.0
+    path_length = sum((b - a).length for a, b in zip(points[:-1], points[1:])) or 1.0
+
+    streamlines = None
+    if objs.get("fibres"):
+        try:
+            streamlines, _ = myo_record.read_fibres(objs["fibres"])
+        except Exception:
+            streamlines = None
+
+    if streamlines is None and arrangement == 'CONVERGENT' and objs.get("origin") and objs.get("insertion"):
+        try:
+            from . import fan
+            props = context.scene.myogen
+            courses, _, _ = fan.fibres(points, objs["origin"], objs["insertion"],
+                                       (props.origin_object, props.insertion_object),
+                                       FIELD_FIBRES)
+            streamlines = courses
+        except Exception:
+            streamlines = None
+
+    edges = np.empty((len(mesh.edges), 2), dtype=int)
+    mesh.edges.foreach_get("vertices", edges.ravel())
+
+    if streamlines is not None and len(streamlines) > 0:
+        coords, u, length = fibre_coordinates_from_streamlines(
+            V, streamlines, arrangement, pennation_deg, belly.myogen_fibre_bundles, edges=edges)
+    else:
+        both = objs.get("origin") is not None and objs.get("insertion") is not None
+        field = None
+        if arrangement == 'CONVERGENT' and both:
+            props = context.scene.myogen
+            field = fan_fibre_field(points, objs["origin"], objs["insertion"],
+                                    (props.origin_object, props.insertion_object))
+        length = path_length
+        far = np.full(len(V), np.inf)
+        d_o_temp = attachment_distance(V, objs["origin"]) / length if objs.get("origin") else far
+        d_i_temp = attachment_distance(V, objs["insertion"]) / length if objs.get("insertion") else far
+        coords, u = fibre_coordinates(V, points, arrangement, pennation_deg, belly.myogen_fibre_bundles,
+                                      attachment_u=attachment_position(d_o_temp, d_i_temp) if both else None,
+                                      fan_field=field)
+
+    for p in mesh.polygons:
+        p.use_smooth = True
+
     far = np.full(len(V), np.inf)
     d_o = attachment_distance(V, objs["origin"]) / length if objs.get("origin") else far
     d_i = attachment_distance(V, objs["insertion"]) / length if objs.get("insertion") else far
-    both = objs.get("origin") is not None and objs.get("insertion") is not None
-    field = None
-    if arrangement == 'CONVERGENT' and both:
-        props = context.scene.myogen
-        field = fan_fibre_field(points, objs["origin"], objs["insertion"],
-                                (props.origin_object, props.insertion_object))
-    coords, u = fibre_coordinates(V, points, arrangement, pennation_deg, belly.myogen_fibre_bundles,
-                                  attachment_u=attachment_position(d_o, d_i) if both else None,
-                                  fan_field=field)
     tendon = tendon_mask(d_o, d_i, belly.myogen_tendon_origin, belly.myogen_tendon_insertion,
                          belly.myogen_tendon_fade)
     bump = np.full(len(u), bundle_size(V, coords) * BUMP_PER_BUNDLE * belly.myogen_relief)
+    bump *= np.clip(1.0 - 0.75 * tendon, 0.25, 1.0)
     for name, kind, data, key in (("myo_fibre", 'FLOAT_VECTOR', coords, "vector"),
                                   ("myo_fibre_u", 'FLOAT', u, "value"),
                                   ("myo_tendon", 'FLOAT', tendon, "value"),

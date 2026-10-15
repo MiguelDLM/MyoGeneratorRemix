@@ -9,32 +9,34 @@ import bpy
 
 from . import myo_record
 from . import preview
+from .modes import to_object_mode
 from . import rings
 from . import volume_builder
 from . import fibre_texture
-from .muscle_texture import apply_muscle_material
+from .muscle_texture import apply_muscle_material, create_ligament_material
 
 
 def _muscle_collection(operator, context):
     coll, _objs = preview.muscle_objects(context)
     if coll is None:
-        operator.report({'ERROR'}, f"Collection '{context.scene.myogen.muscle_name}' not found in 'muscles'")
+        operator.report({'ERROR'}, f"Collection '{context.scene.myogen.muscle_name}' not found")
     return coll
 
 
 def _object_mode(context):
-    if context.active_object is not None and context.active_object.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
+    to_object_mode(context)
 
 
 class Muscle_Preview_Update_Op(bpy.types.Operator):
     """Start the live preview of the muscle belly"""
     bl_idname = "myogen.muscle_preview_update"
+    bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Start Preview"
     bl_description = ("Build the belly as it will be generated, at draft resolution, along the muscle path, "
                       "and keep it updated while you edit the path, the rings or the settings")
 
     def execute(self, context):
+        create_ligament_material()
         if _muscle_collection(self, context) is None:
             return {'CANCELLED'}
         _object_mode(context)
@@ -47,14 +49,19 @@ class Muscle_Preview_Update_Op(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class Muscle_Preview_Stop_Op(bpy.types.Operator):
-    """Stop updating the preview"""
-    bl_idname = "myogen.muscle_preview_stop"
-    bl_label = "Stop Preview"
-    bl_description = "Stop rebuilding the preview on changes; the preview mesh is kept"
+class Muscle_Preview_Discard_Op(bpy.types.Operator):
+    """Discard the live preview"""
+    bl_idname = "myogen.muscle_preview_discard"
+    bl_label = "Discard Preview"
+    bl_description = ("Stop the live preview and delete the preview mesh, e.g. to redo an attachment. The path "
+                      "and the rings (hidden) are kept: Start Preview brings the same shape back")
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        volume_builder.stop_live(context)
+        coll = _muscle_collection(self, context)
+        if coll is None:
+            return {'CANCELLED'}
+        volume_builder.discard_preview(context)
         return {'FINISHED'}
 
 
@@ -70,6 +77,7 @@ def _select_only(context, objs, active):
 class Muscle_Edit_Path_Op(bpy.types.Operator):
     """Edit the muscle path in Edit Mode"""
     bl_idname = "myogen.edit_path"
+    bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Edit Path"
     bl_description = ("Select the muscle path and enter Edit Mode: move its points and handles to set the "
                       "course of the belly. The preview and the rings follow")
@@ -80,6 +88,11 @@ class Muscle_Edit_Path_Op(bpy.types.Operator):
             self.report({'ERROR'}, "No muscle collection")
             return {'CANCELLED'}
         _object_mode(context)
+        if not context.scene.myogen.preview_live:
+            try:
+                volume_builder.start_live(context)
+            except Exception:
+                pass
         try:
             path = volume_builder.ensure_path(context, context.scene.myogen.muscle_name, coll, objs)
         except (KeyError, AttributeError):
@@ -95,6 +108,7 @@ class Muscle_Edit_Path_Op(bpy.types.Operator):
 class Muscle_Reset_Path_Op(bpy.types.Operator):
     """Replace the path with the default one"""
     bl_idname = "myogen.reset_path"
+    bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Reset Path"
     bl_description = ("Replace the muscle path with the default one: from each attachment along its outward "
                       "normal, outside the bone")
@@ -115,6 +129,7 @@ class Muscle_Reset_Path_Op(bpy.types.Operator):
 class Muscle_Select_Rings_Op(bpy.types.Operator):
     """Select the section rings"""
     bl_idname = "myogen.select_rings"
+    bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Select Rings"
     bl_description = ("Select the rings on the path. Click one: G slides it along the path, S sizes the "
                       "section (S X X width, S Y Y thickness), R turns it")
@@ -138,6 +153,7 @@ class Muscle_Select_Rings_Op(bpy.types.Operator):
 class Muscle_Reset_Rings_Op(bpy.types.Operator):
     """Replace the rings with evenly spaced default ones"""
     bl_idname = "myogen.reset_rings"
+    bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Reset Rings"
     bl_description = ("Replace the rings with the number set below, evenly spaced along the path and showing "
                       "the muscle's natural shape (no change)")
@@ -160,12 +176,14 @@ class Muscle_Reset_Rings_Op(bpy.types.Operator):
 class Muscle_Mesh_Generation_Op(bpy.types.Operator):
     """Generate the final muscle mesh"""
     bl_idname = "myogen.muscle_mesh_generation"
+    bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Generate Final Mesh"
     bl_description = ("Build <muscle>_muscle at full resolution with the current path, rings and settings, and "
                       "remove the construction helpers (preview, wire tube, rings); the path is kept for the "
                       "measurements. Replaces an earlier final mesh")
 
     def execute(self, context):
+        create_ligament_material()
         if _muscle_collection(self, context) is None:
             return {'CANCELLED'}
         _object_mode(context)

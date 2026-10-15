@@ -12,7 +12,7 @@ Measurements (volume, lengths, areas) live in `myo_record` and
 ### `select_and_edit_object(obj)`
 
 Make a bone the only selected, active object and enter Edit Mode with face
-selection and the lasso tool, ready to paint an attachment area.
+selection and the circle select tool, ready to paint an attachment area.
 
 | Parameter | Type | Description |
 |---|---|---|

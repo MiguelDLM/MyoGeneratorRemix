@@ -101,6 +101,49 @@ class MetricsTest(unittest.TestCase):
         self.assertNotIn(self.mr.QA_ERROR, [lvl for lvl, _ in findings])
         self.assertEqual([lvl for lvl, _ in row["qa"] if lvl != self.mr.QA_INFO], [])
 
+    def test_overlapping_muscles_are_flagged(self):
+        """Two bellies in the same space are anatomically impossible: measured and flagged."""
+        build_muscle("mass_left", x=30.0 + RADIUS)                       # half-overlapping cylinder
+        build_muscle("ptery_left", x=30.0 - 2.5 * RADIUS)                # clear of both
+        shared, unchecked = self.metrics.belly_overlaps(self.mr.iter_muscle_collections(), 1e-3)
+        self.assertEqual(unchecked, set())
+        lens = RADIUS ** 2 * (2 * math.pi / 3 - math.sqrt(3) / 2) * LENGTH * 1e-9   # m3, circles
+        key = next(k for k in shared if set(k) == {"temp_left", "mass_left"})
+        self.assertAlmostEqual(shared[key], lens, delta=0.06 * lens)
+        self.assertEqual(len(shared), 1)                                  # the third shares nothing
+        rows, _ = self.metrics.compute_muscles(bpy.context, write=False)
+        qa = {r["collection"]: r["qa"] for r in rows}
+        for name, other in (("temp_left", "mass_left"), ("mass_left", "temp_left")):
+            hits = [m for lvl, m in qa[name] if lvl == self.mr.QA_WARNING and "Overlaps" in m]
+            self.assertTrue(hits and other in hits[0], qa[name])
+        self.assertFalse([m for _l, m in qa["ptery_left"] if "Overlaps" in m])
+
+    def test_straight_length_between_path_ends(self):
+        """The straight length joins the path's terminal vertices; a path end off its area is flagged."""
+        row = self.metrics.compute_muscles(bpy.context, write=False)[0][0]
+        self.assertAlmostEqual(row["myo_linear_length_m"], LENGTH * 1e-3, delta=LENGTH * 1e-9)
+        self.assertFalse([m for _l, m in row["qa"] if "Path" in m])
+        path = self.coll.objects["temp_left_curve"]
+        path.data.splines[0].bezier_points[1].co.x += 3 * RADIUS              # end moved off the insertion
+        row = self.metrics.compute_muscles(bpy.context, write=False)[0][0]
+        self.assertAlmostEqual(row["myo_linear_length_m"], math.hypot(LENGTH, 3 * RADIUS) * 1e-3, delta=1e-6)
+        self.assertTrue([m for lvl, m in row["qa"] if lvl == self.mr.QA_WARNING and "insertion area" in m])
+        self.assertFalse([m for _l, m in row["qa"] if "origin area" in m])
+
+    def test_short_finding_labels(self):
+        panel = sys.modules[f"{MODULE_NAME}.myoGenerator_panel"]
+        cases = {
+            "Overlaps 'mass_deep': 12.8 cm3 shared (40.8% of the smaller muscle); two muscles cannot occupy":
+                "Overlap mass_deep 40.8%",
+            "The belly touches only 19% of the insertion area: the insertion is painted larger": "Insertion contact 19%",
+            "Belly mesh is defective (9525 crossing face pairs, 0 non-manifold edges): enclosed": "Defective mesh",
+            "Left/right volumes of 'temp' differ 1.62x": "Left/right volume 1.62×",
+        }
+        for message, label in cases.items():
+            self.assertEqual(panel.short_finding(message), label)
+        long = panel.short_finding("A completely new kind of finding that nobody has seen before, with details")
+        self.assertLessEqual(len(long), panel.SHORT_FINDING_MAX)
+
     def test_record_is_written_and_readable(self):
         self.metrics.compute_muscles(bpy.context, write=True)
         rec = self.mr.read_record(self.coll)
@@ -168,6 +211,56 @@ class MetricsTest(unittest.TestCase):
         rows, _ = self.metrics.compute_muscles(bpy.context, write=False)
         volumes = {r["collection"]: r["myo_volume_m3"] for r in rows}
         self.assertAlmostEqual(volumes["temp_left"], volumes["temp_right"], places=12)
+
+    def test_rename_muscle_and_objects(self):
+        props = bpy.context.scene.myogen
+        self.assertEqual(bpy.ops.myogen.select_muscle(name="temp_left"), {'FINISHED'})
+        self.assertEqual(props.active_muscle, "temp_left")
+        self.assertEqual(props.muscle_name, "temp_left")
+
+        # Edit name in scene properties and call rename_muscle
+        props.muscle_name = "temp_renamed_left"
+        self.assertEqual(bpy.ops.myogen.rename_muscle(), {'FINISHED'})
+
+        self.assertNotIn("temp_left", bpy.data.collections)
+        self.assertIn("temp_renamed_left", bpy.data.collections)
+        coll = bpy.data.collections["temp_renamed_left"]
+        self.assertEqual(coll["myo_name"], "temp_renamed_left")
+        self.assertEqual(coll["myo_side"], "L")
+        self.assertEqual(props.active_muscle, "temp_renamed_left")
+        self.assertEqual(props.muscle_name, "temp_renamed_left")
+
+        objs = self.mr.resolve_objects(coll)
+        self.assertEqual(set(objs), {"origin", "insertion", "path", "belly"})
+        for role, obj in objs.items():
+            self.assertTrue(obj.name.startswith("temp_renamed_left_"))
+
+    def test_collection_outside_root(self):
+        """Muscles or ligaments outside the 'muscles' root collection are discovered and manageable."""
+        # Unlink the muscle collection from root and link to scene collection instead
+        root = self.mr.get_root()
+        coll = bpy.data.collections.get("temp_renamed_left") or self.coll
+        if coll.name in root.children:
+            root.children.unlink(coll)
+        if coll.name not in bpy.context.scene.collection.children:
+            bpy.context.scene.collection.children.link(coll)
+
+        # 1. iter_muscle_collections discovers it
+        names = [c.name for c in self.mr.iter_muscle_collections()]
+        self.assertIn(coll.name, names)
+
+        # 2. select_muscle activates it
+        props = bpy.context.scene.myogen
+        self.assertEqual(bpy.ops.myogen.select_muscle(name=coll.name), {'FINISHED'})
+        self.assertEqual(props.active_muscle, coll.name)
+
+        # 3. Rename works outside root
+        props.muscle_name = "ligament_outside_left"
+        self.assertEqual(bpy.ops.myogen.rename_muscle(), {'FINISHED'})
+        self.assertIn("ligament_outside_left", bpy.data.collections)
+        new_coll = bpy.data.collections["ligament_outside_left"]
+        self.assertIn(new_coll, self.mr.iter_muscle_collections())
+        self.assertEqual(props.active_muscle, "ligament_outside_left")
 
 
 if __name__ == "__main__":

@@ -49,6 +49,18 @@ def scene_scale_findings(context, collections):
     return myo_record.check_scene_scale(context.scene, extent, what="Extent of the attachment areas")
 
 
+def _surface_gap(surface_obj, point):
+    """Distance (Blender units) from a point to a mesh surface."""
+    import bmesh
+    from mathutils.bvhtree import BVHTree
+    bm = bmesh.new()
+    bm.from_mesh(surface_obj.data)
+    bm.transform(surface_obj.matrix_world)
+    hit = BVHTree.FromBMesh(bm).find_nearest(point)
+    bm.free()
+    return hit[3] if hit[0] is not None else None
+
+
 def measure_fibres(props, belly, origin, insertion, path_m, mpu):
     """Belly fibres of one muscle for the fibre length, with their QA findings.
 
@@ -71,7 +83,8 @@ def measure_fibres(props, belly, origin, insertion, path_m, mpu):
     if belly is None or origin is None or insertion is None:
         return None, []
     try:
-        fibres = belly_fibres.belly_fibres(belly, origin, insertion, props.belly_fibre_count)
+        fibres = belly_fibres.belly_fibres(belly, origin, insertion, props.belly_fibre_count,
+                                           props.fibre_seeding)
     except ValueError as e:
         return None, [(myo_record.QA_WARNING, f"Belly fibres could not be traced ({e}): path length used")]
     findings = []
@@ -82,17 +95,95 @@ def measure_fibres(props, belly, origin, insertion, path_m, mpu):
                                                     "belly falls short of it; no fibre can reach the rest"))
     if fibres["reached"] < myo_record.FIBER_REACHED_MIN:
         findings.append((myo_record.QA_WARNING, f"Only {fibres['reached'] * 100:.0f}% of the belly fibres reach "
-                                                "the other attachment (Show Belly Fibres)"))
+                                                "the other attachment (Show in Scene > Fibres)"))
     if fibres["detoured"] > myo_record.FIBER_DETOURED_MAX:
         findings.append((myo_record.QA_WARNING, f"{fibres['detoured'] * 100:.0f}% of the belly fibres detour (longer "
                                                 f"than {belly_fibres.DETOUR_MAX:g}x the straight distance between "
                                                 "their ends) and are left out: check the belly shape "
-                                                "(Show Belly Fibres, magenta)"))
+                                                "(Show in Scene > Fibres, magenta)"))
     longest = float(fibres["lengths"].max()) * mpu
     if path_m > 0.0 and longest > myo_record.FIBER_MAX_TO_PATH * path_m:
         findings.append((myo_record.QA_WARNING, f"Longest belly fibre is {longest / path_m:.1f}x the path: the "
-                                                "belly may detour (Show Belly Fibres)"))
+                                                "belly may detour (Show in Scene > Fibres)"))
     return fibres, findings
+
+
+#: Cells across the largest side of the box where two bellies may overlap.
+OVERLAP_CELLS_ACROSS = 64
+#: Remesh voxel of the closed belly copies (fraction of the belly's size).
+OVERLAP_REMESH = 1.0 / 192
+#: A closed copy smaller than this fraction of the belly's own volume has collapsed.
+OVERLAP_MIN_CLOSED = 0.25
+
+
+def belly_overlaps(collections, metres_per_unit):
+    """Volume shared by every pair of bellies whose bounding boxes intersect.
+
+    Each belly is closed first (temporary voxel remesh,
+    :func:`belly_fibres.closed_belly`: sculpted bellies may have holes or
+    self-overlaps); both are rasterised on one grid over the intersection of
+    their boxes (``OVERLAP_CELLS_ACROSS`` cells across) and the cells inside
+    both are counted.
+
+    :arg collections: Muscle collections.
+    :type collections: list of :class:`bpy.types.Collection`
+    :arg metres_per_unit: Metres per Blender unit.
+    :type metres_per_unit: float
+    :return: ``(shared, unchecked)``: ``(name_a, name_b)`` -> shared volume
+       (m³) for pairs that share any, and the names of bellies whose closed
+       copy collapsed (less than ``OVERLAP_MIN_CLOSED`` of their own volume:
+       their overlaps cannot be measured).
+    :rtype: tuple
+    """
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    from . import volume_builder
+    bellies = []
+    for coll in collections:
+        belly = myo_record.resolve_objects(coll).get("belly")
+        if belly is not None and belly.type == 'MESH' and belly.data.polygons:
+            corners = [belly.matrix_world @ Vector(c) for c in belly.bound_box]
+            lo = np.array([min(c[i] for c in corners) for i in range(3)])
+            hi = np.array([max(c[i] for c in corners) for i in range(3)])
+            bellies.append((coll.name, belly, lo, hi))
+    closed = {}
+    unchecked = set()
+    for name, belly, _lo, _hi in bellies:
+        bm = belly_fibres.closed_belly(belly, max(belly.dimensions) * OVERLAP_REMESH)
+        co = np.array([list(v.co) for v in bm.verts])
+        if abs(bm.calc_volume(signed=True)) < OVERLAP_MIN_CLOSED * myo_record.mesh_stats(belly)[0]:
+            unchecked.add(name)
+        else:
+            closed[name] = (BVHTree.FromBMesh(bm), co.min(0)[2])
+        bm.free()
+
+    out = {}
+    for i, (na, ba, la, ha) in enumerate(bellies):
+        for nb, bb, lb, hb in bellies[i + 1:]:
+            if na in unchecked or nb in unchecked:
+                continue
+            lo, hi = np.maximum(la, lb), np.minimum(ha, hb)
+            if np.any(hi <= lo):
+                continue
+            voxel = float((hi - lo).max()) / OVERLAP_CELLS_ACROSS
+            jitter = voxel * 0.0137
+            xs = np.arange(lo[0] + voxel / 2, hi[0], voxel) + jitter
+            ys = np.arange(lo[1] + voxel / 2, hi[1], voxel) + 0.7 * jitter
+            zs = np.arange(lo[2] + voxel / 2, hi[2], voxel)
+            if not (len(xs) and len(ys) and len(zs)):
+                continue
+            inside = None
+            for name in (na, nb):
+                t, z_min = closed[name]
+                occ = volume_builder.occupancy(t, xs, ys, zs, min(z_min, lo[2]) - voxel, signed=False,
+                                               columns=None if inside is None else inside.any(axis=2))
+                inside = occ if inside is None else inside & occ
+                if not inside.any():
+                    break
+            shared = float(inside.sum()) * voxel ** 3 * metres_per_unit ** 3
+            if shared > 0.0:
+                out[(na, nb)] = shared
+    return out, unchecked
 
 
 def compute_muscles(context, write=True):
@@ -100,11 +191,18 @@ def compute_muscles(context, write=True):
 
     Per muscle: volume and mass (belly; the voxel-enclosed volume replaces the
     signed-sum volume when a closed belly overlaps itself by more than
-    ``myo_record.OVERLAP_VOLUME_TOLERANCE``), path and straight lengths, fibre length
+    ``myo_record.OVERLAP_VOLUME_TOLERANCE``), path length and straight length
+    (between the path's terminal vertices, :func:`myo_record.curve_ends`; the
+    attachment centroids without a path) with a check that the path ends lie
+    on their attachment areas, fibre length
     and PCSA (:func:`myo_record.pcsa_from_volume` with the scene's ratio and
     pennation, or :func:`myo_record.pcsa_from_fibres` from the belly fibres
-    when ``fiber_length_source`` is ``BELLY_FIBRES``), force, attachment areas and centroids, then
-    :func:`myo_record.check_muscle` and the left/right comparison.
+    when ``fiber_length_source`` is ``BELLY_FIBRES``; with ``write`` the fibres
+    are then also exported as ``<M>_fibres`` for simulators,
+    :func:`belly_fibres.export_fibres`), force, attachment areas and centroids, then
+    :func:`myo_record.check_muscle`, the left/right comparison and the
+    overlap between muscles (:func:`belly_overlaps`,
+    :func:`myo_record.check_overlaps`).
 
     :arg context: Context (reads ``scene.myogen``).
     :type context: :class:`bpy.types.Context`
@@ -157,10 +255,18 @@ def compute_muscles(context, write=True):
                                        "the uncertainty"))
 
         path_m = myo_record.curve_length(path) * mpu
-        linear_m = (i_cent - o_cent).length * mpu if origin and insertion else 0.0
+        ends = myo_record.curve_ends(path)
+        path_qa = []
+        if ends is not None:                                     # straight line between the path's terminal vertices
+            linear_m = (ends[1] - ends[0]).length * mpu
+            if origin is not None and insertion is not None:
+                path_qa = myo_record.check_path_ends(_surface_gap(origin, ends[0]) * mpu,
+                                                     _surface_gap(insertion, ends[1]) * mpu, path_m)
+        else:
+            linear_m = (i_cent - o_cent).length * mpu if origin and insertion else 0.0
         pcsa_m2, fiber_m = myo_record.pcsa_from_volume(volume_m3, path_m, props.fiber_length_ratio,
                                                        props.pennation_deg)
-        source, fibre_values, fibre_qa = "PATH", {}, []
+        source, fibre_values, fibre_qa, fibres = "PATH", {}, [], None
         if props.fiber_length_source == 'BELLY_FIBRES':
             fibres, fibre_qa = measure_fibres(props, belly, origin, insertion, path_m, mpu)
             if fibres is not None:
@@ -207,9 +313,14 @@ def compute_muscles(context, write=True):
             "myo_insertion_area_m2": i_area_bu * mpu ** 2,
             **fibre_values,
         }
+        if write and fibres is not None and source == "BELLY_FIBRES":
+            fibres_obj = belly_fibres.export_fibres(coll, coll.name, fibres, volume_m3, mpu,
+                                                    props.fiber_length_ratio, props.pennation_deg)
+            values["myo_fibres_obj"] = fibres_obj.name
         qa = myo_record.check_muscle(values, ref_m, belly_hole_error=hole_error,
                                      belly_signed_volume=signed_bu if belly else 1.0)
         qa.extend(overlap_qa)
+        qa.extend(path_qa)
         qa.extend(fibre_qa)
         if belly is None:
             qa.insert(0, (myo_record.QA_ERROR, f"No belly mesh ('{coll.name}_muscle'): generate the final mesh"))
@@ -219,8 +330,15 @@ def compute_muscles(context, write=True):
                          insertion_centroid=i_cent, qa=qa))
 
     bilateral = myo_record.check_bilateral({r["collection"]: r["myo_volume_m3"] for r in rows})
+    shared, unchecked = belly_overlaps([bpy.data.collections[r["collection"]] for r in rows], mpu)
+    overlaps = myo_record.check_overlaps(shared, {r["collection"]: r["myo_volume_m3"] for r in rows})
+    for name in unchecked:
+        overlaps.setdefault(name, []).append(
+            (myo_record.QA_INFO, "Overlap with other muscles not checked: the belly mesh is too defective to "
+                                 "close (repair it)"))
     for row in rows:
         row["qa"].extend(bilateral.get(row["collection"], []))
+        row["qa"].extend(overlaps.get(row["collection"], []))
         if write:
             coll = bpy.data.collections[row["collection"]]
             myo_record.tag_roles(coll)

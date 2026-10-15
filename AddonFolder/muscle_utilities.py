@@ -6,10 +6,12 @@ Measurements (volume, lengths, areas) live in :mod:`myo_record` and
 import bpy
 from mathutils import Vector
 
+from .modes import to_object_mode
+
 
 def select_and_edit_object(obj):
     """Make a bone the only selected, active object and enter Edit Mode with face
-    selection and the lasso tool, ready to paint an attachment area.
+    selection and the circle select tool, ready to paint an attachment area.
 
     :arg obj: Bone mesh (anything else is ignored).
     :type obj: :class:`bpy.types.Object`
@@ -27,11 +29,7 @@ def select_and_edit_object(obj):
     obj.select_set(True)
     
     # Ensure we're in object mode before doing mode operations
-    if bpy.context.mode != 'OBJECT':
-        try:
-            bpy.ops.object.mode_set(mode='OBJECT')
-        except RuntimeError:
-            pass
+    to_object_mode()
 
     # Use a temporary override context to ensure the mode set operation is valid
     try:
@@ -50,7 +48,7 @@ def select_and_edit_object(obj):
                 bpy.ops.object.mode_set(mode='EDIT')
                 bpy.ops.mesh.select_mode(type='FACE')
                 try:
-                    bpy.ops.wm.tool_set_by_id(name="builtin.select_lasso", space_type='VIEW_3D')
+                    bpy.ops.wm.tool_set_by_id(name="builtin.select_circle", space_type='VIEW_3D')
                 except RuntimeError:
                     pass  # Tool setting might fail, but that's OK
                 bpy.ops.mesh.select_all(action='DESELECT')
@@ -85,8 +83,7 @@ def with_temp_object_active(context, obj, action):
 
     try:
         # Switch to object mode and select our target
-        if context.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
+        to_object_mode(context)
         
         # Deselect all and select target
         for scene_obj in context.scene.objects:

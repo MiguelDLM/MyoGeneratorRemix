@@ -44,13 +44,19 @@ convention (`<M>_origin`, `<M>_muscle`, ...) by `resolve_objects`.
 | `DEFAULT_SPECIFIC_TENSION_N_CM2` | `30.0` |
 | `DEFAULT_DENSITY_G_CM3` | `1.0597` |
 | `_SIDE_SUFFIXES` | `(('_left', 'L'), ('_right', 'R'), ('_l', 'L'), ('_r', 'R'), ('.l', 'L'), ('.r', 'R'), (...` |
+| `FIBRE_POINTS_KEY` | `'myo_fibre_points'` |
+| `FIBRE_SEEDING_KEY` | `'myo_fibre_seeding'` |
+| `FIBRE_LIST_KEYS` | `('myo_fibre_length_m', 'myo_fibre_weight', 'myo_fibre_share', 'myo_fibre_pcsa_area_m2',...` |
 | `REF_LENGTH_RANGE_M` | `(0.003, 6.0)` |
 | `FIBER_TO_REF` | `(0.03, 1.2)` |
 | `CBRT_VOLUME_TO_REF` | `(0.01, 0.6)` |
 | `PATH_TO_LINEAR` | `(0.9, 1.8)` |
+| `PATH_END_TO_PATH` | `0.1` |
 | `BILATERAL_VOLUME_RATIO` | `1.5` |
 | `HOLE_VOLUME_TOLERANCE` | `0.02` |
 | `OVERLAP_VOLUME_TOLERANCE` | `0.02` |
+| `MUSCLE_OVERLAP_WARNING` | `0.02` |
+| `MUSCLE_OVERLAP_INFO` | `0.002` |
 | `DENSITY_RANGE` | `(1.0, 1.1)` |
 | `SPECIFIC_TENSION_RANGE` | `(10.0, 60.0)` |
 | `FIBER_RATIO_RANGE` | `(0.3, 1.0)` |
@@ -118,6 +124,28 @@ of mixed fibre lengths (a fan). The returned fibre length is the
 
 **Returns** (tuple of float): `(pcsa_m2, fiber_length_m)`; PCSA is 0.0 without positive lengths.
 
+### `fibre_pcsa(volume_m3, lengths_m, weights, shares, fiber_length_ratio=DEFAULT_FIBER_LENGTH_RATIO, pennation_deg=DEFAULT_PENNATION_DEG)`
+
+PCSA of every fibre of a belly, by the two sharing rules.
+
+* **By area** (option A): the muscle's PCSA from the mean fibre length
+  (`pcsa_from_fibres`, `MEAN`) shared in proportion to `weights`
+  (each fibre's part of the attachment area it was seeded on).
+* **By volume** (option B): `V_i cos(theta) / (L_i x ratio)` with
+  `V_i = V x share_i`, the fibre's own part of the volume over its own
+  length (Woodley & Mercer 2005); the sum is the `WEIGHTED` PCSA.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `volume_m3` | float | Muscle volume (m³). |
+| `lengths_m` | sequence of float | Fibre lengths at rest (m), attachment to attachment. |
+| `weights` | sequence of float | Area weight of each fibre (any positive scale). |
+| `shares` | sequence of float | Volume share of each fibre (any positive scale). |
+| `fiber_length_ratio` | float | Fascicle / fibre-line length. |
+| `pennation_deg` | float | Pennation angle (degrees). |
+
+**Returns** (tuple of list): `(by_area_m2, by_volume_m2)`, one value per fibre each.
+
 ### `pcsa_method_label(fiber_length_ratio, pennation_deg, source='PATH', model='MEAN')`
 
 Human-readable description of the PCSA assumptions, stored in `myo_pcsa_method`.
@@ -144,6 +172,16 @@ control points with straight lines, which under-estimates curved paths.
 | `resolution` | int | Samples per Bezier segment. |
 
 **Returns** (float): Length in Blender units.
+
+### `curve_ends(curve_obj)`
+
+World positions of the first and last points of a curve's first spline.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `curve_obj` | `bpy.types.Object` | Curve object (Bezier or poly/NURBS spline). |
+
+**Returns** (tuple of `mathutils.Vector` or None): `(start, end)` or None if the curve has no points.
 
 ### `mesh_stats(obj)`
 
@@ -307,7 +345,7 @@ Whether a collection is a MyoGen muscle (has a record, or legacy-named objects).
 
 All MyoGen muscle collections of the file.
 
-**Returns** (list of `bpy.types.Collection`): Muscle collections (children of the root); empty if there is no root.
+**Returns** (list of `bpy.types.Collection`): Muscle collections (children of the root, or collections with a muscle record elsewhere).
 
 ### `tag_roles(coll)`
 
@@ -337,6 +375,40 @@ Read a muscle record.
 | `coll` | `bpy.types.Collection` | The muscle collection. |
 
 **Returns** (dict): Every key of `RECORD_KEYS` (None when missing) plus `objects` (role -> object; stored names first, then tags/names), `collection` (collection name), `qa` (list of `[level, message]`) and `has_pcsa` (True when a positive PCSA is stored). `myo_name` and `myo_side` fall back to the collection name.
+
+### `write_fibres(coll, name, polylines, values, seeding='')`
+
+Create or replace the fibres object of a muscle.
+
+A mesh of `N` polylines with `K` points each, vertex `f * K + k` being
+point `k` (0 = origin, `K - 1` = insertion) of fibre `f`, consecutive
+points joined by edges; world-space coordinates (Blender units), identity
+matrix. Per-fibre values are custom properties (`FIBRE_LIST_KEYS`).
+The object gets `myo_role = "fibres"` and is hidden in the viewport.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `coll` | `bpy.types.Collection` | The muscle collection. |
+| `name` | str | Object name (`<M>_fibres`). |
+| `polylines` | sequence of sequences of 3 floats | `N` polylines of `K` world-space points each. |
+| `values` | dict | Key of `FIBRE_LIST_KEYS` -> list of `N` values. |
+| `seeding` | str | How the fibres were seeded (stored as `FIBRE_SEEDING_KEY`). |
+
+**Returns** (`bpy.types.Object`): The fibres object.
+
+**Raises** `ValueError`: If the polylines differ in length or a list has the wrong size.
+
+### `read_fibres(obj)`
+
+Polylines and per-fibre values of a fibres object (`write_fibres`).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `obj` | `bpy.types.Object` | Fibres object. |
+
+**Returns** (tuple): `(polylines, values)`: list of `N` lists of `K` world-space `mathutils.Vector` (Blender units), and key -> list of `N` floats for the keys present.
+
+**Raises** `ValueError`: If the object is not a fibres mesh.
 
 ### `check_scene_scale(scene, ref_length_bu, what='Reference bone')`
 
@@ -387,6 +459,29 @@ Compare the volumes of left/right counterparts.
 | `volumes_by_name` | dict | Collection name -> volume (m³). |
 
 **Returns** (dict): Collection name -> findings, only for pairs that differ more than `BILATERAL_VOLUME_RATIO`.
+
+### `check_path_ends(origin_gap_m, insertion_gap_m, path_length_m)`
+
+Findings for path ends that do not lie on their attachment areas.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `origin_gap_m` | float | Distance from the path's first point to the origin surface (m). |
+| `insertion_gap_m` | float | Distance from its last point to the insertion surface (m). |
+| `path_length_m` | float | Path length (m). |
+
+**Returns** (list of tuple): WARNING per end farther than `PATH_END_TO_PATH` x the path length.
+
+### `check_overlaps(shared_by_pair, volumes_by_name)`
+
+Findings for muscles that occupy the same space (anatomically impossible).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `shared_by_pair` | dict | `(name_a, name_b)` -> volume inside both bellies (m³). |
+| `volumes_by_name` | dict | Collection name -> belly volume (m³). |
+
+**Returns** (dict): Collection name -> findings: WARNING when the shared volume is at least `MUSCLE_OVERLAP_WARNING` of the smaller muscle, INFO from `MUSCLE_OVERLAP_INFO` (minor interpenetration); nothing below.
 
 ### `worst_level(findings)`
 
